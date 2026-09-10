@@ -95,7 +95,7 @@
   button.btn-ghost{background:transparent;border:1px solid var(--steel-600);color:var(--paper-dim);padding:7px 13px;font-size:.78rem;cursor:pointer;border-radius:4px;}
   button.btn-ghost:hover{border-color:var(--safety);color:var(--paper);}
   button.rm{background:transparent;border:1px solid var(--steel-700);color:var(--paper-dim);
-  width:24px;height:24px;border-radius:4px;font-size:.78rem;cursor:pointer;line-height:1;}
+    width:24px;height:24px;border-radius:4px;font-size:.78rem;cursor:pointer;line-height:1;}
   button.rm:hover{border-color:var(--danger);color:var(--danger);background:rgba(192,96,90,.1);}
   .actions-row{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;align-items:center;}
 
@@ -914,6 +914,7 @@ function depletionMap(){
   });
   return result;
 }
+
 function removeInventoryCode(code){
   APP.invRaw = APP.invRaw.filter(i=>i.code!==code);
   delete APP.invOverrides[code];
@@ -923,6 +924,7 @@ function removeInventoryCode(code){
   toast(`Removed ${code}`);
 }
 window.removeInventoryCode = removeInventoryCode;
+
 function renderInventory(){
   const agg = aggregateColors();
   const deplete = depletionMap();
@@ -962,8 +964,6 @@ function renderInventory(){
       }
     });
   });
-
-  body.querySelectorAll('input.ml-input').forEach(inp=>{
 
   body.querySelectorAll('input.ml-input').forEach(inp=>{
     inp.addEventListener('change', ()=>{
