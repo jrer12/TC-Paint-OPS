@@ -557,7 +557,15 @@ function parseScheduleWorkbook(wb, bomData){
 // ================= INVENTORY PARSER (client-side) =================
 function parseInventoryWorkbook(wb){
   let targetRows=null;
-  for(const name of wb.SheetNames){
+  // Prefer a sheet literally named "Log" (case-insensitive) — workbooks like this often
+  // also have a condensed "PRINT SHEET" view with the same SERIES/SKU/COLOR header but
+  // fewer rows and stale/mislabeled date columns. Only fall back to scanning every sheet
+  // if there is no sheet actually named Log.
+  const orderedNames = [
+    ...wb.SheetNames.filter(n => n.trim().toLowerCase() === 'log'),
+    ...wb.SheetNames.filter(n => n.trim().toLowerCase() !== 'log'),
+  ];
+  for(const name of orderedNames){
     const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, raw:true, defval:null, cellDates:true});
     for(let i=0;i<Math.min(rows.length,10);i++){
       const r=rows[i];
