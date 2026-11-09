@@ -283,6 +283,8 @@
       <strong>"Runs out at"</strong> walks the Build Plan's included, matched, paint-type rows in schedule order (month, then priority where given) and subtracts each row's paint demand from current stock — the row where a color first goes negative is shown as where you'd run out, assuming the plan is worked in that order.
       <br><br>
       Stock levels and reorder points here are shared and saved automatically. Re-importing an inventory file (Data &amp; Import tab) refreshes current stock but keeps your reorder points.
+      <br><br>
+      Any paint color a BOM card calls for that isn't in your inventory file is added here automatically at 0 mL and tagged <span class="flag mixed">from BOM</span>, so it shows as OUT until you enter its stock.
     </div>
   </div>
 
@@ -382,9 +384,19 @@ function saveKey(key, value){
 }
 
 // ---------------- app state ----------------
-const APP = { bom: [], bomBySku: {}, schedule: [], rowStateMap: {}, manualPlan: [], invRaw: [], invOverrides: {}, qtyBasis: 'remaining', meta: {} };
+const APP = { bom: [], bomBySku: {}, bomCodeNames: {}, schedule: [], rowStateMap: {}, manualPlan: [], invRaw: [], invOverrides: {}, qtyBasis: 'remaining', meta: {} };
 
-function rebuildBomIndex(){ APP.bomBySku = {}; APP.bom.forEach(b=>APP.bomBySku[b.sku]=b); }
+function rebuildBomIndex(){
+  APP.bomBySku = {}; APP.bomCodeNames = {};
+  APP.bom.forEach(b=>{
+    APP.bomBySku[b.sku]=b;
+    (b.colors||[]).forEach(c=>{
+      if(!c.code) return;
+      const nm = (c.name||'').trim().toUpperCase();
+      if(!(c.code in APP.bomCodeNames) || nm.length > APP.bomCodeNames[c.code].length) APP.bomCodeNames[c.code] = nm;
+    });
+  });
+}
 
 function approxColor(name){
   const n = (name||'').toLowerCase();
@@ -532,7 +544,8 @@ function parseScheduleWorkbook(wb, bomData){
       if(firstNorm==='UNALLOCATED'){ section='UNALLOCATED'; header=null; return; }
       if(firstNorm==='MANUFACTURER'){ header=r.map(c=>c?String(c).trim().toUpperCase():''); headerIdx={}; header.forEach((h,i)=>{ if(h) headerIdx[h]=i; }); return; }
       if(!header) return;
-      const modIdx = headerIdx['MOD SKU'];
+      // The SKU column is normally headed "MOD SKU", but Excel tables sometimes rename it (e.g. "Column1").
+      const modIdx = ['MOD SKU','MODSKU','MOD SKU#','SKU','COLUMN1'].map(k=>headerIdx[k]).find(i=>i!==undefined);
       if(modIdx===undefined || modIdx>=r.length) return;
       const modSku = r[modIdx];
       if(!modSku || typeof modSku!=='string' || !modSku.trim()) return;
@@ -888,16 +901,20 @@ document.getElementById('invFilterSeg').addEventListener('click', e=>{
 });
 document.getElementById('applyDefaultReorder').addEventListener('click', ()=>{
   const v = parseFloat(document.getElementById('defaultReorder').value)||0;
-  Object.keys(APP.invOverrides).forEach(c=>APP.invOverrides[c].reorder=v);
-  APP.invRaw.forEach(i=>{ if(!APP.invOverrides[i.code]) APP.invOverrides[i.code]={current:i.current_ml, reorder:v}; else APP.invOverrides[i.code].reorder=v; });
+  allInvCodes().forEach(code=>{
+    if(!APP.invOverrides[code]) APP.invOverrides[code] = {current: invCurrent(code), reorder: v, name: invName(code)};
+    else APP.invOverrides[code].reorder = v;
+  });
   saveKey('inventory_overrides', APP.invOverrides);
   renderInventory();
 });
 
 function invCurrent(code){ return APP.invOverrides[code]?.current ?? (APP.invRaw.find(i=>i.code===code)?.current_ml ?? 0); }
 function invReorder(code){ return APP.invOverrides[code]?.reorder ?? 500; }
-function invName(code){ return APP.invOverrides[code]?.name ?? (APP.invRaw.find(i=>i.code===code)?.name ?? ''); }
-function allInvCodes(){ return [...new Set([...APP.invRaw.map(i=>i.code), ...Object.keys(APP.invOverrides)])].sort(); }
+function invName(code){ return APP.invOverrides[code]?.name ?? (APP.invRaw.find(i=>i.code===code)?.name ?? (APP.bomCodeNames[code] ?? '')); }
+// Every paint any BOM card calls for is tracked, even if it isn't in the inventory file yet (starts at 0 mL).
+function allInvCodes(){ return [...new Set([...APP.invRaw.map(i=>i.code), ...Object.keys(APP.invOverrides), ...Object.keys(APP.bomCodeNames)])].sort(); }
+function isBomOnly(code){ return !APP.invRaw.some(i=>i.code===code) && !APP.invOverrides[code]; }
 function statusFor(code){ const cur=invCurrent(code); if(cur<=0) return 'out'; if(cur<=invReorder(code)) return 'reorder'; return 'ok'; }
 
 function depletionMap(){
@@ -921,7 +938,7 @@ function removeInventoryCode(code){
   storeSet('inventory_raw', APP.invRaw);
   storeSet('inventory_overrides', APP.invOverrides);
   renderInventory();
-  toast(`Removed ${code}`);
+  toast(code in APP.bomCodeNames ? `${code} reset to 0 mL (a BOM card uses it)` : `Removed ${code}`);
 }
 window.removeInventoryCode = removeInventoryCode;
 
@@ -945,7 +962,7 @@ function renderInventory(){
     const rowClass = status==='out' ? 'out' : status==='reorder' ? 'reorder' : '';
     return `<tr class="${rowClass}">
       <td><span class="dot" style="background:${approxColor(name)};display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;"></span>
-        <span class="code">${code}</span> ${name}</td>
+        <span class="code">${code}</span> ${name}${isBomOnly(code) ? ' <span class="flag mixed" title="Added automatically because a BOM card uses this color. Enter its stock to track it.">from BOM</span>' : ''}</td>
       <td class="num"><input type="number" class="ml-input" value="${cur}" data-code="${code}" data-field="current"></td>
       <td class="num"><input type="number" class="ml-input" value="${reorder}" data-code="${code}" data-field="reorder"></td>
       <td>${statusFlag}</td>
@@ -959,7 +976,11 @@ function renderInventory(){
   body.querySelectorAll('button.rm').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const code = btn.dataset.code;
-      if(confirm(`Remove ${code} (${invName(code)}) from inventory tracking? This can't be undone.`)){
+      const inBom = code in APP.bomCodeNames;
+      const msg = inBom
+        ? `${code} (${invName(code)}) is used by a BOM card, so it will reappear at 0 mL. Reset it to 0 mL?`
+        : `Remove ${code} (${invName(code)}) from inventory tracking? This can't be undone.`;
+      if(confirm(msg)){
         removeInventoryCode(code);
       }
     });
@@ -1032,13 +1053,15 @@ document.getElementById('importBom').addEventListener('change', async e=>{
   try{
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data, {type:'array'});
+    const knownBefore = new Set(allInvCodes());
     APP.bom = parseBomWorkbook(wb);
     rebuildBomIndex();
+    const newColors = allInvCodes().filter(c=>!knownBefore.has(c)).length;
     APP.meta.bom_updated = new Date().toISOString();
     await storeSet('bom_data', APP.bom);
     await storeSet('meta', APP.meta);
     populateManualSkuSelect(); buildRowStates(); renderSchedule(); updateMetaLabels();
-    toast(`BOM cards updated — ${APP.bom.length} SKUs parsed`);
+    toast(`BOM cards updated — ${APP.bom.length} SKUs parsed` + (newColors ? `, ${newColors} new paint color${newColors===1?'':'s'} added to inventory at 0 mL` : ''));
   }catch(err){ toast('Could not read that file — check it matches the BOM Cards format'); }
   e.target.value='';
 });
