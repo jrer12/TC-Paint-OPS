@@ -34,6 +34,28 @@
   .tabpage{display:none;}
   .tabpage.active{display:block;}
 
+
+  .ap-add{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+  .ap-add select,.ap-add input{background:var(--steel-800);border:1px solid var(--steel-600);color:var(--paper);padding:7px 9px;border-radius:4px;font-size:.82rem;}
+  #apList{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:16px;}
+  .ap-card{background:var(--steel-900);border:1px solid var(--steel-700);border-radius:6px;padding:14px;display:flex;gap:14px;}
+  .ap-pic{flex:0 0 150px;display:flex;flex-direction:column;gap:6px;align-items:center;}
+  .ap-pic .imgbox{width:150px;height:150px;background:#fff;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .ap-pic img{max-width:100%;max-height:100%;object-fit:contain;}
+  .ap-pic .noimg{color:#777;font-size:.7rem;text-align:center;padding:8px;}
+  .ap-pic .orionname{font-size:.66rem;color:var(--paper-dim);text-align:center;line-height:1.25;}
+  .ap-body{flex:1;min-width:0;}
+  .ap-title{font-weight:700;font-size:1rem;}
+  .ap-sub{font-size:.76rem;color:var(--paper-dim);margin-bottom:8px;}
+  .ap-qty{display:flex;align-items:center;gap:8px;margin:6px 0 8px;}
+  .ap-qty input{width:84px;font-size:1.3rem;font-weight:700;text-align:center;background:var(--steel-800);border:1px solid var(--safety);color:var(--paper);border-radius:4px;padding:4px;}
+  .ap-desc{font-size:.76rem;color:var(--paper-dim);margin:8px 0;white-space:pre-wrap;max-height:110px;overflow:auto;border-left:2px solid var(--steel-700);padding-left:8px;}
+  .ap-colors{width:100%;font-size:.76rem;border-collapse:collapse;}
+  .ap-colors td,.ap-colors th{padding:3px 6px;border-bottom:1px solid var(--steel-700);text-align:left;}
+  .ap-tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;font-size:.72rem;align-items:center;}
+  .ap-tools select,.ap-tools input{background:var(--steel-800);border:1px solid var(--steel-600);color:var(--paper);padding:3px 6px;border-radius:4px;font-size:.72rem;max-width:200px;}
+  .ap-empty{color:var(--paper-dim);padding:30px;text-align:center;border:1px dashed var(--steel-700);border-radius:6px;grid-column:1/-1;}
+  @media (max-width:700px){ #apList{grid-template-columns:1fr;} .ap-card{flex-direction:column;} }
   .panel{background:var(--steel-900);border:1px solid var(--steel-700);border-radius:6px;padding:16px 18px 18px;margin-bottom:18px;}
   .panel h2{font-size:.78rem;text-transform:uppercase;letter-spacing:.09em;color:var(--paper-dim);
     margin:0 0 12px;font-weight:700;border-bottom:1px solid var(--steel-700);padding-bottom:8px;
@@ -184,6 +206,7 @@
 
   <div class="tabs no-print">
     <button class="tabbtn active" data-tab="schedule">Build Plan</button>
+    <button class="tabbtn" data-tab="active">Active Projects</button>
     <button class="tabbtn" data-tab="sched">Schedule Editor</button>
     <button class="tabbtn" data-tab="inventory">Paint Inventory</button>
     <button class="tabbtn" data-tab="bom">BOM Library</button>
@@ -354,6 +377,21 @@
   </div>
 
   <!-- ============ TAB: BOM LIBRARY (editable) ============ -->
+  <!-- ============ TAB: ACTIVE PROJECTS ============ -->
+  <div class="tabpage" id="tab-active">
+    <div class="panel">
+      <h2>Active Projects <span class="h2sub" id="apMeta"></span></h2>
+      <div class="ap-add">
+        <select id="apSku" style="min-width:300px;"></select>
+        <input type="number" id="apQty" min="1" placeholder="Qty" style="width:90px;">
+        <button class="btn" id="apAddBtn">+ Add to active projects</button>
+        <span class="colornote">Pick the SKUs you are building right now. Quantity starts from what the schedule still has remaining; change it any time. Shared with everyone signed in.</span>
+      </div>
+      <div id="apList"></div>
+      <div class="footnote" style="margin-top:12px;">Pictures come from Orion's Orion Exclusives page and are matched by SKU where possible. If a picture is missing or wrong, choose the right Orion item on the card, or paste an image link. Paint estimates use the same per-part allowances as the Build Plan.</div>
+    </div>
+  </div>
+
   <div class="tabpage" id="tab-bom">
     <div class="panel">
       <h2>BOM Library <span class="h2sub" id="bomLibMeta"></span></h2>
@@ -514,6 +552,9 @@ const SYNC = {
   manual_plan:         {col:'manual_plan',   id:r=>r.sku,
                         get:()=>APP.manualPlan,         set:recs=>{ APP.manualPlan = recs.sort((a,b)=>String(a.sku).localeCompare(String(b.sku))); },
                         seed:()=>[]},
+  active_projects:     {col:'active_projects', id:r=>r.sku,
+                        get:()=>APP.activeProjects,     set:recs=>{ APP.activeProjects = recs.sort((a,b)=>String(a.added_at||'').localeCompare(String(b.added_at||'')) || String(a.sku).localeCompare(String(b.sku))); },
+                        seed:()=>[]},
 };
 const lastSynced = {};            // key -> Map(logical id -> canonical json) as last seen on the server
 const syncTimers = {};
@@ -572,7 +613,7 @@ function applySnapshot(key, recs){
 }
 
 // ---------------- app state ----------------
-const APP = { bom: [], bomBySku: {}, bomCodeNames: {}, schedule: [], rowStateMap: {}, manualPlan: [], invRaw: [], invOverrides: {}, qtyBasis: 'remaining', meta: {} };
+const APP = { bom: [], bomBySku: {}, bomCodeNames: {}, schedule: [], rowStateMap: {}, manualPlan: [], activeProjects: [], invRaw: [], invOverrides: {}, qtyBasis: 'remaining', meta: {} };
 
 function rebuildBomIndex(){
   APP.bomBySku = {}; APP.bomCodeNames = {};
@@ -1723,6 +1764,83 @@ document.getElementById('importInventory').addEventListener('change', async e=>{
   e.target.value='';
 });
 
+
+// ---------------- active projects ----------------
+const ORION_MAP = {"PR57TNG":{"n":"KELTEC PR57 5.7X28 PISTOL TUNGSTEN","i":"https://cdn28.coreware.com/cache/image-small-9292-f1fcd494f34f6526e459c09f5a606d58.png"},"PR57BBRZ":{"n":"KELTEC PR57 5.7X28 PISTOL BURNT BRONZE","i":"https://cdn28.coreware.com/cache/image-small-84382-9cafe52608d145504f5c5089cb9ca488.png"},"JK12-0120101":{"n":"PTR THE JACK 12 GA SHOTGUN","i":"https://images.coreware.com/images/products/small-1094481-14323645.jpg"},"KSGNVY":{"n":"KELTEC KSG 12GA SHTGN NAVY","i":"https://cdn28.coreware.com/cache/image-small-8190-96aa9a755927760ebd3fa3e968219ac2.png"},"KSGBBRNZ":{"n":"KELTEC KSG 12GA SHTGN BURNT BRONZE","i":"https://cdn28.coreware.com/cache/image-small-8191-cb4541c5587e6203d6884ac59f5d9dff.png"},"PMR30BNVY":{"n":"KELTEC PMR30 22MGNM PSTL BLUE/NAVY","i":"https://cdn28.coreware.com/cache/image-small-8195-0ac1728d737ce904b85f1bbcd83f3ebe.png"},"KSGTUNGSTEN":{"n":"KELTEC KSG 12GA SHTGN TUNGSTEN","i":"https://cdn28.coreware.com/cache/image-small-8192-60d60c196bd4aac6c57b19939ef138af.png"},"FX9-P-MULTICAM":{"n":"FREEDOM ORDINANCE PSTL 9MM MULTI NO BRC","i":"https://cdn28.coreware.com/cache/image-small-1829-476a183c98dfbecfb8c8e47d8366141e.png"},"P17NVY":{"n":"KELTEC P17 22LR PSTL NAVY BLUE 16+1","i":"https://cdn28.coreware.com/cache/image-small-8185-3303a8eefeab0f5f7d6ac92381fe6505.png"},"P17TNG":{"n":"KELTEC P17 22LR TUNGSTEN GRY PSTL 16+1","i":"https://cdn28.coreware.com/cache/image-small-8186-fc7ab33a08cf9a6e5d829d9f13a6dc9f.png"},"P17BBRZ":{"n":"KELTEC P17 22LR PSTL BURNT BRONZE 16+1","i":"https://cdn28.coreware.com/cache/image-small-8187-fa8187bb20583a80b7ab78685b1aad70.png"},"393455":{"n":"EAA MC P35 TUNG SLD BLK FRAME G10 GR","i":"https://cdn28.coreware.com/cache/image-small-5707-61a6f950bd8a72b4a602d373a546e201.png"},"322C-BAS-ROSEGLD":{"n":"SIG SAUER P322C 22LR PSTL ROSE GOLD","i":"https://cdn28.coreware.com/cache/image-small-8182-41525ebdb3dcf76889b9f3fbb12827f4.png"},"DB197AK621":{"n":"DIAMONDBACK DB15 5.56 CHOCOLATE CHIP","i":"https://cdn28.coreware.com/cache/image-small-6860-3944c4667645ee1f000ae43274ae11f1.png"},"14193-MTIGER":{"n":"SMITH & WESSON 1854 STEALTH HUNTER MIAMI TIGER 44M","i":"https://cdn28.coreware.com/cache/image-small-9122-47582934e02af9dd48471aba39f97a84.png"},"14195-MTIGER":{"n":"SMITH & WESSON 1854 STEALTH HUNTER MIAMI TIGER STR","i":"https://cdn28.coreware.com/cache/image-small-9122-47582934e02af9dd48471aba39f97a84.png"},"BG47-GOLD":{"n":"BSR47 BULGARIAN AKM PATTERN RIFLE","i":"https://cdn28.coreware.com/cache/image-small-86864-8c3db61a56b367163e8acc4d8174061f.png"},"LVL3BCKPKPLATE":{"n":"GUARD DOG 3+ BACKPACK PLATE INSERT","i":"https://cdn28.coreware.com/cache/image-small-8016-9b0304ac7cfaa22a1253a9fdb2aedad9.png"},"Z15TAC16UBDU":{"n":"IWI ZION Z15 5.56 16 BBL URBAN","i":"https://cdn28.coreware.com/cache/image-small-5952-1188c7b149ddfa2686c247f3b5b3a4a6.jpg"},"MR-15-TRUMP":{"n":"D MENKE INDSTRY BILLET LWR RCVR MULTI BLK TRUMP","i":"https://cdn28.coreware.com/cache/image-small-6614-6cedaa69925308ba33ccaa06bcd91c3e.png"},"13812-ODG":{"n":"SMITH & WESSON 1854 44 REM MAG ODG","i":"https://cdn28.coreware.com/cache/image-small-8188-7956c65a90afedad891055ded6b4a82e.png"},"ZR7762UF-GOLD":{"n":"ZASTAVA ZPAPM70 7.62X39 WOOD HG GOLD","i":"https://cdn28.coreware.com/cache/image-small-6809-ad6b4bfce41a9ab1950b8b6063fab9c0.png"},"DB177AK621":{"n":"DIAMONDBK DB15 5.56 CHOCOLATE CHIP","i":"https://cdn28.coreware.com/cache/image-small-7164-8613c565bc3160db407b072cca422338.png"},"953030161TB-BRBN":{"n":"ROSSI R95 TRIPLE BLACK 30-30WIN","i":"https://cdn28.coreware.com/cache/image-small-7183-9bc26539500326b8b262bc6cbad3f454.png"},"31210-TRUMP2.0":{"n":"RUGER 10/22 CARBINE 22LR TRUMP 2.0","i":"https://cdn28.coreware.com/cache/image-small-7260-ed0121023c5819eb8beb0c60e847acc7.png"},"14452":{"n":"SMITH & WESSON BODYGUARD 2.0 380ACP PISTOL","i":"https://cdn28.coreware.com/cache/image-small-7781-029ee0e20332a6fce3eb649852af84e9.png"},"01103-BOURBON":{"n":"RUGER 10/22 22LR RIFLE BOURBON EDITION","i":"https://cdn28.coreware.com/cache/image-small-7823-8ff38d5e64288fbfaceb09dab5cf1ce0.png"},"365XCA-9-BXR3CSBW":{"n":"SIG SAUER P365 X-MACRO 9MM CRUSHED SILVER","i":"https://cdn28.coreware.com/cache/image-small-8403-94a6cf803bd7c389873f86a077a751d2.png"},"365X9BXR3P-2TT":{"n":"SIG SAUER P365X TWO TONE TAN 9MM","i":"https://cdn28.coreware.com/cache/image-small-86478-4c14bd0754dc4b0e49f30e28f502627d.png"},"UX4350701FR-BC":{"n":"GLOCK G43X 9MM PISTOL BLACK CHERRY","i":"https://cdn28.coreware.com/cache/image-small-8629-4ef539c4136f7857cdf1b5f3afae7512.png"},"PX4350201FRMOSBM":{"n":"GLOCK 43X MOS BLACK MULTI CAM FS 9MM","i":"https://cdn28.coreware.com/cache/image-small-8665-e3ca64aff192c780d7ef87a193c78056.png"},"14417-AT":{"n":"SMITH & WESSON PC BODYGUARD 2.0 CARRY COMP AZTEC","i":"https://cdn28.coreware.com/cache/image-small-86447-73442c12b530c9879caba36ebc42df5c.png"},"14417-BLUSH":{"n":"SMITH & WESSON PC BODYGUARD 2.0 CARRY COMP CRANBERRY","i":"https://cdn28.coreware.com/cache/image-small-8680-55110625c0b33ed8cad996dc2bc46cb5.png"},"14417-RG":{"n":"SMITH & WESSON PC BODYGUARD 2.0 CARRY COMP ROSE GOLD","i":"https://cdn28.coreware.com/cache/image-small-8681-575ddc35c9b8de042705dd5b4579eb2f.png"},"14417-SHERBERT":{"n":"SMITH & WESSON PC BODYGUARD 2.0 CARRY COMP PINK FRAME","i":"https://cdn28.coreware.com/cache/image-small-86448-0265c765107a958de187470bc67c2c06.png"},"365FUSE-TEQUILA":{"n":"SIG SAUER P365 FUSE TEQUILA LITE 9MM","i":"https://cdn28.coreware.com/cache/image-small-8718-1f2f906eaaeae9b0684aba1bf76f8b76.png"},"PA17G5-WTSKETCH":{"n":"GLOCK 17 GEN 5 WHITE SKETCH FS 9MM","i":"https://cdn28.coreware.com/cache/image-small-9036-e18460c7b0a9ff395a8c26c020d63215.png"},"13926-LEOPARD":{"n":"SMITH & WESSON BODYGUARD 2.0 MS LEOPARD PRINT 380ACP","i":"https://cdn28.coreware.com/cache/image-small-86450-01a63771b6ea80b1bc85051aa7f049aa.png"},"365X9BXR3P-TOPO":{"n":"SIG SAUER P365X TOPO 9MM PSTL 3.1 BBL 2-12RD","i":"https://cdn28.coreware.com/cache/image-small-86475-35d7f3f4c3c8122286080f9daca9b367.png"},"02315-CC":{"n":"POF P-15 BASE RIFLE CHOCOLATE CHIP","i":"https://cdn28.coreware.com/cache/image-small-9125-2b7ff996a3f24368514255d9566df0ba.png"},"14263-2TT":{"n":"SMITH & WESSON M&P 9 SHIELD X NTS MCMILLAN/MIDNIGHT","i":"https://cdn28.coreware.com/cache/image-small-87093-2e8f502a25dd64c502ea2afa90844a7d.png"},"14263-ANIME":{"n":"SMITH & WESSON M&P 9 SHIELD X NTS BLACK/LIME GREEN","i":"https://cdn28.coreware.com/cache/image-small-86486-56105c734183e9222a968b49465484aa.png"},"13591-LIBERTY":{"n":"SMITH & WESSON EQUALIZER LIBERTY 250TH 9MM","i":"https://cdn28.coreware.com/cache/image-small-9199-e5dd6ed1e98956e091db4cbdb13b3efa.png"},"14264-LIBERTY":{"n":"SMITH & WESSON M&P 9 SHIELD X MS LIBERTY 250TH","i":"https://cdn28.coreware.com/cache/image-small-9201-6903b3d89b1236448bfc6bf4b8e39886.png"},"150544-LIBERTY":{"n":"SMITH & WESSON 442 AIRWEIGHT LIBERTY 250TH","i":"https://cdn28.coreware.com/cache/image-small-9205-39971c330fffe16368ee1a30d53a06f2.png"}};            // Orion Exclusives page (orionfflsales.com), read Nov 19 2026: Orion SKU -> {n: name, i: picture}
+function orionGuess(sku){
+  const up=String(sku||'').toUpperCase(), keys=Object.keys(ORION_MAP), byUp={}; keys.forEach(k=>byUp[k.toUpperCase()]=k);
+  const cands=[up, up.replace(/^[A-Z]{3,6}(?=\d)/,'')];                  // SMIT14417-AT -> 14417-AT, SIG365X9... -> 365X9...
+  for(const c of cands) if(byUp[c]) return byUp[c];
+  return '';
+}
+function apOrionKey(p){ if(p.orion==='none') return ''; return p.orion || orionGuess(p.sku); }
+function apImage(p){
+  if(p.img) return {src:p.img, name:'custom image'};
+  const k=apOrionKey(p); return k ? {src:ORION_MAP[k].i, name:ORION_MAP[k].n, key:k, guessed:!p.orion} : null;
+}
+function apRemaining(sku){ return APP.schedule.filter(r=>r.mod_sku===sku).reduce((s,r)=>s+(Number(r.remaining)||0),0); }
+function populateApSkuSelect(){
+  const sel=document.getElementById('apSku'); if(!sel) return; const cur=sel.value;
+  const taken=new Set(APP.activeProjects.map(p=>p.sku));
+  sel.innerHTML='<option value="">Select a SKU to add...</option>'+APP.bom.slice().sort((a,b)=>String(a.sku).localeCompare(String(b.sku)))
+    .filter(b=>!taken.has(b.sku)).map(b=>`<option value="${escH(b.sku)}">${escH(b.sku)} — ${escH(b.design||'')}</option>`).join('');
+  sel.value=cur;
+}
+const PART_LABEL = {frame:'Frame', slide:'Slide', barrel:'Barrel', mag_base_plate:'Mag base', small_parts:'Small parts'};
+function renderActiveProjects(){
+  const list=document.getElementById('apList'); if(!list) return;
+  populateApSkuSelect();
+  const total=APP.activeProjects.reduce((s,p)=>s+(Number(p.qty)||0),0);
+  document.getElementById('apMeta').textContent = `${APP.activeProjects.length} project${APP.activeProjects.length===1?'':'s'} · ${total} guns`;
+  if(!APP.activeProjects.length){ list.innerHTML='<div class="ap-empty">No active projects yet. Pick a SKU above to add what you are building now.</div>'; return; }
+  const orionOpts='<option value="">Auto-match</option><option value="none">No picture</option>'+Object.keys(ORION_MAP).sort().map(k=>`<option value="${escH(k)}">${escH(k)} — ${escH(ORION_MAP[k].n.slice(0,34))}</option>`).join('');
+  list.innerHTML=APP.activeProjects.map(p=>{
+    const b=APP.bomBySku[p.sku], qty=Number(p.qty)||0, img=apImage(p), rem=apRemaining(p.sku);
+    const colors=(b&&b.colors||[]).map(c=>{
+      const per=PART_ML[c.part], ml=per?Math.round(per*qty*10)/10:null;
+      return `<tr><td class="code">${escH(c.code)}</td><td>${escH(c.name||'')}${c.splatter?' <span class="flag mixed">splatter</span>':''}${c.mixed?' <span class="flag mixed">mixed</span>':''}</td><td>${c.part?escH(PART_LABEL[c.part]||c.part):'<span class="colornote">part not set</span>'}</td><td>${ml!=null?ml+' mL':'—'}</td></tr>`;
+    }).join('');
+    const pic = img ? `<div class="imgbox"><img src="${escH(img.src)}" alt="" data-apimg="1"><div class="noimg" style="display:none">Picture would not load</div></div><div class="orionname">${escH(img.name)}${img.guessed?'<br><span class="colornote">auto-matched</span>':''}</div>`
+                    : `<div class="imgbox"><div class="noimg">No Orion picture matched.<br>Choose one below.</div></div>`;
+    return `<div class="ap-card" data-sku="${escH(p.sku)}">
+      <div class="ap-pic">${pic}</div>
+      <div class="ap-body">
+        <div class="ap-title">${escH(b?b.design:p.sku)}</div>
+        <div class="ap-sub"><span class="code">${escH(p.sku)}</span> · ${escH(b?((b.mfr||'')+' '+(b.model||'')+' '+(b.caliber||'')).trim():'no BOM card found for this SKU')}</div>
+        <div class="ap-qty"><label class="colornote">Making</label><input type="number" min="0" value="${qty}" data-apqty="1"><span class="colornote">${rem?`schedule has ${rem} remaining`:'not on the schedule'}</span></div>
+        ${b&&b.description?`<div class="ap-desc">${escH(b.description)}</div>`:''}
+        ${colors?`<table class="ap-colors"><thead><tr><th>Code</th><th>Color</th><th>Part</th><th>For ${qty}</th></tr></thead><tbody>${colors}</tbody></table>`:'<div class="colornote">No paint codes on this BOM card.</div>'}
+        <div class="ap-tools">
+          <select data-aporion="1" title="Which Orion item's picture to show">${orionOpts.replace(`value="${escH(p.orion||'')}"`,`value="${escH(p.orion||'')}" selected`)}</select>
+          <input type="text" data-apimgurl="1" placeholder="or paste image link" value="${escH(p.img||'')}">
+          <button class="btn-ghost" data-apremove="1">Remove</button>
+        </div>
+      </div></div>`;
+  }).join('');
+}
+function apUpdate(sku, fn){ const p=APP.activeProjects.find(x=>x.sku===sku); if(!p) return; fn(p); p.edited_by=userEmail(); saveKey('active_projects', APP.activeProjects); }
+document.getElementById('apAddBtn').addEventListener('click', ()=>{
+  const sku=document.getElementById('apSku').value; if(!sku){ toast('Pick a SKU first'); return; }
+  if(APP.activeProjects.some(p=>p.sku===sku)){ toast('That SKU is already active'); return; }
+  const q=parseInt(document.getElementById('apQty').value,10), qty=Number.isFinite(q)&&q>=0 ? q : (apRemaining(sku)||1);
+  APP.activeProjects.push({sku, qty, orion:'', img:'', added_by:userEmail(), added_at:new Date().toISOString()});
+  saveKey('active_projects', APP.activeProjects);
+  document.getElementById('apQty').value=''; renderActiveProjects();
+});
+const apList=document.getElementById('apList');
+apList.addEventListener('change', e=>{
+  const card=e.target.closest('.ap-card'); if(!card) return; const sku=card.dataset.sku;
+  if(e.target.dataset.apqty){ const q=Math.max(0,parseInt(e.target.value,10)||0); apUpdate(sku,p=>{p.qty=q;}); renderActiveProjects(); }
+  else if(e.target.dataset.aporion!==undefined){ apUpdate(sku,p=>{p.orion=e.target.value; if(e.target.value) p.img='';}); renderActiveProjects(); }
+  else if(e.target.dataset.apimgurl!==undefined){ const v=e.target.value.trim(); if(v && !/^https?:\/\//i.test(v)){ toast('Image link must start with http:// or https://'); return; } apUpdate(sku,p=>{p.img=v;}); renderActiveProjects(); }
+});
+apList.addEventListener('click', e=>{
+  if(!e.target.dataset.apremove) return; const card=e.target.closest('.ap-card'); const sku=card.dataset.sku;
+  if(!confirm('Remove '+sku+' from active projects?')) return;
+  APP.activeProjects=APP.activeProjects.filter(p=>p.sku!==sku); saveKey('active_projects', APP.activeProjects); renderActiveProjects();
+});
+apList.addEventListener('error', e=>{ if(e.target && e.target.dataset && e.target.dataset.apimg){ e.target.style.display='none'; const n=e.target.nextElementSibling; if(n) n.style.display='block'; } }, true);
+
 // ---------------- tabs ----------------
 document.querySelectorAll('.tabbtn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -1731,6 +1849,7 @@ document.querySelectorAll('.tabbtn').forEach(btn=>{
     if(btn.dataset.tab==='inventory') renderInventory();
     if(btn.dataset.tab==='bom') renderBomLibrary();
     if(btn.dataset.tab==='sched') renderSchedEditor();
+    if(btn.dataset.tab==='active') renderActiveProjects();
   });
 });
 
@@ -1739,7 +1858,7 @@ let appReady=false, unsubs=[], refreshT=null, refreshTries=0, running=null;
 function activeTabId(){ const p=document.querySelector('.tabpage.active'); return p ? p.id.replace('tab-','') : ''; }
 function userIsEditing(){
   const a=document.activeElement;
-  return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest('#schedBody,#invBody,#seBody,#manualList'));
+  return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest('#schedBody,#invBody,#seBody,#manualList,#apList'));
 }
 function scheduleRefresh(){ clearTimeout(refreshT); refreshT=setTimeout(doRefresh, 250); }
 function doRefresh(){
@@ -1752,6 +1871,7 @@ function doRefresh(){
   if(t==='inventory') renderInventory();
   if(t==='bom') renderBomLibrary();
   if(t==='sched') renderSchedEditor();
+  if(t==='active') renderActiveProjects();
   [...document.getElementById('qtyBasisSeg').children].forEach(b=>b.classList.toggle('active', b.dataset.v===APP.qtyBasis));
 }
 function stopListeners(){ unsubs.forEach(u=>{ try{u();}catch(e){} }); unsubs=[]; Object.keys(lastSynced).forEach(k=>delete lastSynced[k]); appReady=false; }
