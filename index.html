@@ -77,6 +77,21 @@
   .flag.reorder{background:rgba(201,154,46,.2);color:var(--warn);}
   .flag.ok{background:rgba(92,138,92,.18);color:#8fbb8f;}
   .no-match{color:var(--danger);font-size:.72rem;font-style:italic;}
+  .bomgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin-bottom:12px;}
+  .bomgrid label{display:flex;flex-direction:column;gap:3px;font-size:.7rem;color:var(--paper-dim);text-transform:uppercase;letter-spacing:.04em;}
+  .bomgrid input,.bomgrid textarea{text-transform:none;letter-spacing:0;}
+  textarea.bomdesc{width:100%;min-height:150px;background:var(--steel-800);border:1px solid var(--steel-600);color:var(--paper);
+    padding:8px;border-radius:4px;font-size:.82rem;font-family:var(--sans);line-height:1.45;resize:vertical;}
+  .bomchips{display:flex;flex-wrap:wrap;gap:4px;}
+  .bomchip{font-size:.68rem;font-family:var(--mono);border:1px solid var(--steel-700);border-radius:10px;padding:1px 7px;color:var(--paper-dim);white-space:nowrap;}
+  .bomchip.out{border-color:rgba(192,96,90,.6);color:#e08c86;}
+  .bomchip.ok{border-color:rgba(92,138,92,.45);}
+  .bomchip.unv{border-color:rgba(90,140,200,.45);color:#7fa8d9;}
+  .coloredit td{vertical-align:middle;}
+  .coloredit input[type=text]{width:100%;min-width:70px;}
+  .colornote{font-size:.7rem;color:var(--paper-dim);}
+  .colornote.bad{color:#e08c86;}
+
 
   .qty-input{width:60px;text-align:right;}
   .ml-input{width:80px;text-align:right;}
@@ -151,6 +166,7 @@
   <div class="tabs no-print">
     <button class="tabbtn active" data-tab="schedule">Build Plan</button>
     <button class="tabbtn" data-tab="inventory">Paint Inventory</button>
+    <button class="tabbtn" data-tab="bom">BOM Library</button>
     <button class="tabbtn" data-tab="data">Data &amp; Import</button>
   </div>
 
@@ -286,6 +302,35 @@
       <br><br>
       Any paint color a BOM card calls for that isn't in your inventory file is added here automatically at 0 mL and tagged <span class="flag mixed">from BOM</span>, so it shows as OUT until you enter its stock.
     </div>
+  </div>
+
+  <!-- ============ TAB: BOM LIBRARY (editable) ============ -->
+  <div class="tabpage" id="tab-bom">
+    <div class="panel">
+      <h2>BOM Library <span class="h2sub" id="bomLibMeta"></span></h2>
+      <div class="toolbar">
+        <input type="text" id="bomSearch" placeholder="Search SKU, design, gun, paint code or color..." style="min-width:280px;">
+        <select id="bomFilter">
+          <option value="all">All cards</option>
+          <option value="issues">Needs a color check</option>
+          <option value="edited">Edited on this site</option>
+        </select>
+        <button class="btn" id="bomNewBtn">+ New BOM card</button>
+      </div>
+      <div class="table-scroll" style="max-height:420px;">
+        <table>
+          <thead><tr><th>SKU</th><th>Gun</th><th>Design</th><th>Paint colors (checked against Cerakote's list)</th><th></th></tr></thead>
+          <tbody id="bomLibBody"></tbody>
+        </table>
+      </div>
+      <div class="footnote" style="margin-top:10px;">
+        <span class="flag ok">official</span> code and name match Cerakote's H-Series list &nbsp;
+        <span class="flag out">check</span> code and name disagree &nbsp;
+        <span class="flag mixed">unverified</span> not on the (2021) list &mdash; newer colors and F/FX codes land here.
+        Changes save for everyone immediately. Re-importing a BOM xlsx asks whether to keep cards edited here.
+      </div>
+    </div>
+    <div class="panel" id="bomEditorPanel" style="display:none;"></div>
   </div>
 
   <!-- ============ TAB: DATA & IMPORT ============ -->
@@ -673,6 +718,217 @@ function populateMonthFilter(){
   [...new Set(APP.schedule.map(r=>r.month))].forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; monthFilter.appendChild(o); });
 }
 const manualSkuSel = document.getElementById('manualSku');
+
+// ================= BOM LIBRARY: official color reference + editor =================
+// Source: Cerakote H-Series technical data sheet (2021). Newer colors and F/FX codes are not on it, so they show as "unverified".
+const OFFICIAL_H = {"H-322":"Blood Orange","H-250":"A.I. Dark Earth","H-190":"Armor Black","H-349":"Aztec Teal","H-259":"Barrett Bronze","H-269":"Barrett Brown","H-213":"Battleship Grey","H-244":"Bazooka Pink","H-143":"Benelli Sand","H-319":"Black Cherry","H-329":"Blue Raspberry","H-185":"Blue Titanium","H-157":"Bright Nickel","H-217":"Bright Purple","H-140":"Bright White","H-214":"Bull Shark Grey","H-148":"Burnt Bronze","H-308":"Cadex Tan","H-338":"Charcoal Green","H-258":"Chocolate Brown","H-112":"Cobalt","H-296":"Cobalt Kinetics Green","H-295":"Cobalt Kinetics Slate","H-130":"Combat Grey","H-149":"Copper Brown","H-310":"Copper Suede","H-347":"Copper","H-144":"Corvette Yellow","H-235":"Coyote Tan","H-221":"Crimson","H-314":"Crushed Orchid","H-255":"Crushed Silver","H-247":"Desert Sage","H-199":"Desert Sand","H-256":"Desert Verde","H-166":"Electric Yellow","H-900":"Electrical Barrier Coating","H-212":"Federal Brown","H-216":"Firehouse Red","H-265":"Flat Dark Earth","H-248":"Forest Green","H-312":"Frost","H-30372":"FS Brown Sand","H-30118":"FS Field Drab","H-33446":"FS Sabre Sand","H-20180":"FS Tan","H-261":"Glock FDE","H-184":"Glock Grey","H-109":"Gloss Black","H-122":"Gold","H-146":"Graphite Black","H-351":"Green Mamba","H-219":"Gun Metal Grey","H-318":"Habanero Red","H-204":"Hazel Green","H-242":"Hidden White","H-300":"High Gloss Armor Clear","H-200":"Highland Green","H-346":"Hi-Vis Orange","H-128":"Hunter Orange","H-353":"Island Green","H-356":"It's A Boy","H-401":"Jesse James Civil Defense Blue","H-402":"Jesse James Cold War Grey","H-400":"Jesse James Eastern Front Green","H-127":"Kel-Tec Navy Blue","H-354":"Lemon Zest","H-142":"Light Sand","H-267":"MagPul Flat Dark Earth","H-231":"MagPul Foliage Green","H-232":"MagPul O.D. Green","H-188":"MagPul Stealth Grey","H-301":"Matte Armor Clear","H-203":"McMillan Tan","H-238":"Midnight Blue","H-294":"Midnight Bronze","H-264":"Mil Spec Green","H-240":"Mil Spec O.D. Green","H-313":"Mojito","H-225":"Mud Brown","H-343":"MultiCam Bright Green","H-342":"MultiCam Dark Brown","H-341":"MultiCam Dark Green","H-345":"MultiCam Dark Grey","H-340":"MultiCam Light Green","H-344":"MultiCam Olive","H-339":"MultiCam Pale Green","H-315":"Northern Lights","H-189":"Noveske Bazooka Green","H-187":"Noveske Tiger Eye Brown","H-171":"NRA Blue","H-236":"O.D. Green","H-331":"Parakeet Green","H-226":"Patriot Brown","H-357":"Periwinkle","H-311":"Pink Champagne","H-328":"Pink Sherbet","H-337":"Platinum Grey","H-298":"Plum Brown","H-326":"Polar Blue","H-141":"Prison Pink","H-332":"Purplexed","H-8000":"Ral 8000","H-220":"Ridgeway Blue","H-175":"Robin's Egg Blue","H-327":"Rose Gold","H-306":"Ruby Red","H-348":"Sangria","H-151":"Satin Aluminum","H-147":"Satin Mag","H-150":"Savage Stainless","H-172":"Sea Blue","H-333":"Sedona","H-158":"Shimmer Aluminum","H-210":"Sig Dark Grey","H-224":"Sig Pink","H-169":"Sky Blue","H-229":"Sniper Green","H-234":"Sniper Grey","H-136":"Snow White","H-245":"Socom Blue","H-305":"Springfield FDE","H-304":"Springfield Grey","H-316":"Squatch Green","H-152":"Stainless","H-139":"Steel Grey","H-262":"Stone Grey","H-297":"Stormtrooper White","H-317":"Sunflower","H-227":"Tactical Grey","H-309":"Tequila Sunrise","H-325":"Terra Cotta","H-170":"Titanium","H-268":"Troy Coyote Tan","H-237":"Tungsten","H-167":"USMC Red","H-293":"Vortex Bronze","H-197":"Wild Purple","H-168":"Zombie Green"};
+const OFFICIAL_BY_NAME = {};
+const normName = s => String(s||'').toLowerCase().replace(/[^a-z0-9]/g,'');
+Object.entries(OFFICIAL_H).forEach(([c,n])=>{ OFFICIAL_BY_NAME[normName(n)] = c; });
+function escH(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function namesAgree(a,b){
+  const x=normName(a), y=normName(b);
+  if(!x||!y) return true;
+  if(x===y || x.includes(y) || y.includes(x)) return true;
+  return diceSim(x,y) >= 0.8;
+}
+// status: ok | check | unverified | noname
+function checkColor(c){
+  const code=(c.code||'').toUpperCase();
+  const official = OFFICIAL_H[code];
+  if(!official) return {status:'unverified', msg:'Not on the 2021 Cerakote H-Series list (newer color or F/FX series).'};
+  if(!c.name) return {status:'noname', official, msg:`${code} is ${official}.`};
+  if(namesAgree(c.name, official)) return {status:'ok', official, msg:`${code} = ${official}`};
+  const otherCode = OFFICIAL_BY_NAME[normName(c.name)];
+  let msg = `${code} is ${official}, but this card says "${c.name}".`;
+  if(otherCode) msg += ` "${OFFICIAL_H[otherCode]}" is ${otherCode}.`;
+  return {status:'check', official, suggestCode:otherCode||null, msg};
+}
+function cardIssues(card){ return (card.colors||[]).filter(c=>checkColor(c).status==='check').length; }
+
+const NAME_STOP = new Set(['paint','base','coat','flash','laser','stencil','apply','mask','blast','degrease','disassemble','wet','second','third','slide','frame','barrel','gradient','and','on','in','then','with','over','of','cure','bake','trigger','controls']);
+// Same idea as the xlsx importer, run on a single description: find paint codes, names, parts, splatter/mixed flags.
+function detectColorsFromText(desc){
+  const text = String(desc||'').replace(/\r/g,'').replace(/\n+/g,'. ');
+  const entries={}, order=[];
+  text.split(/[,.;]/).forEach(clause=>{
+    const codes=[...clause.matchAll(/\b([A-Za-z]{1,3})-(\d{3})\b/g)];
+    if(!codes.length) return;
+    const splatter=/splatter/i.test(clause), mixed=/\bmix/i.test(clause);
+    codes.forEach(m=>{
+      const code=m[1].toUpperCase()+'-'+m[2];
+      const after=clause.slice(clause.indexOf(m[0])+m[0].length).trim().split(/\s+/);
+      const nameWords=[];
+      for(const w of after.slice(0,6)){
+        const ww=w.replace(/[^A-Za-z]/g,'');
+        if(ww && /^[A-Z]/.test(ww) && !NAME_STOP.has(ww.toLowerCase())) nameWords.push(ww); else break;
+      }
+      if(!(code in entries)){ entries[code]={code,name:nameWords.join(' '),splatter,mixed,part:null}; order.push(code); }
+      else { entries[code].splatter=entries[code].splatter||splatter; entries[code].mixed=entries[code].mixed||mixed; if(!entries[code].name) entries[code].name=nameWords.join(' '); }
+    });
+  });
+  const flat=String(desc||'');
+  const hits=findPartsInText(flat);
+  const assigned={};
+  [...flat.matchAll(/\b([A-Za-z]{1,3})-(\d{3})\b/g)].forEach(m=>{
+    const code=m[1].toUpperCase()+'-'+m[2];
+    const cand=hits.filter(p=>p[0]<m.index);
+    if(cand.length){ const best=cand[cand.length-1]; if(m.index-best[0]<80 && !(code in assigned)) assigned[code]=best[1]; }
+  });
+  return order.map(c=>({...entries[c], part:assigned[c]||null}));
+}
+
+let bomEdit = null;   // {orig: sku|null, card: {...}}
+function bomCardsFiltered(){
+  const q=(document.getElementById('bomSearch').value||'').trim().toLowerCase();
+  const f=document.getElementById('bomFilter').value;
+  return APP.bom.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).filter(b=>{
+    if(f==='issues' && !cardIssues(b)) return false;
+    if(f==='edited' && !b.site_edited) return false;
+    if(!q) return true;
+    const hay=[b.sku,b.design,b.mfr,b.model,...(b.colors||[]).flatMap(c=>[c.code,c.name])].join(' ').toLowerCase();
+    return q.split(/\s+/).every(t=>hay.includes(t));
+  });
+}
+function renderBomLibrary(){
+  const body=document.getElementById('bomLibBody'); if(!body) return;
+  const withIssues=APP.bom.filter(b=>cardIssues(b)).length;
+  document.getElementById('bomLibMeta').textContent=`${APP.bom.length} cards · ${withIssues} need a color check · ${APP.bom.filter(b=>b.site_edited).length} edited here`;
+  const rows=bomCardsFiltered();
+  body.innerHTML = rows.length ? rows.map(b=>{
+    const chips=(b.colors||[]).map(c=>{
+      const r=checkColor(c);
+      const cls=r.status==='check'?'out':(r.status==='unverified'?'unv':'ok');
+      const fixed=c.orig_code?` (was ${escH(c.orig_code)})`:'';
+      return `<span class="bomchip ${cls}" title="${escH(r.msg)}">${escH(c.code)} ${escH(c.name||'')}${fixed}</span>`;
+    }).join('') || '<span class="colornote">no paint codes found</span>';
+    return `<tr><td><span class="code">${escH(b.sku)}</span>${b.site_edited?' <span class="flag mixed">edited</span>':''}</td>
+      <td>${escH(b.mfr||'')} ${escH(b.model||'')}</td><td>${escH(b.design||'')}</td>
+      <td><div class="bomchips">${chips}</div></td>
+      <td><button class="btn-ghost" data-bomedit="${escH(b.sku)}">Edit</button></td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="colornote">No cards match.</td></tr>';
+}
+function openBomEditor(sku){
+  const base = sku ? APP.bomBySku[sku] : null;
+  const card = base ? JSON.parse(JSON.stringify(base)) : {sku:'',design:'',mfr:'',model:'',caliber:'',description:'',paint_gal:0,colors:[]};
+  if(!card.colors) card.colors=[];
+  bomEdit={orig:sku||null, card};
+  renderBomEditor();
+  const p=document.getElementById('bomEditorPanel'); p.style.display='block'; p.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function renderBomEditor(){
+  const p=document.getElementById('bomEditorPanel'); if(!bomEdit){ p.style.display='none'; return; }
+  const c=bomEdit.card, isNew=!bomEdit.orig;
+  const partOpts=cur=>['<option value=""></option>'].concat(Object.entries(PART_LABELS).map(([k,l])=>`<option value="${k}" ${cur===k?'selected':''}>${l}</option>`)).join('');
+  const rows=c.colors.map((col,i)=>{
+    const r=checkColor(col);
+    const note = (col.orig_code?`Imported as ${escH(col.orig_code)} and auto-corrected. `:'') + escH(r.msg);
+    const fix = r.status==='check' ? ` <button class="btn-ghost" data-colfix="${i}">Use ${escH(r.official)}</button>${r.suggestCode?` <button class="btn-ghost" data-colfixcode="${i}">Use ${escH(r.suggestCode)}</button>`:''}` : '';
+    return `<tr data-ci="${i}">
+      <td style="width:90px;"><input type="text" data-cf="code" value="${escH(col.code)}"></td>
+      <td><input type="text" data-cf="name" value="${escH(col.name||'')}"></td>
+      <td><select data-cf="part">${partOpts(col.part)}</select></td>
+      <td><label><input type="checkbox" data-cf="splatter" ${col.splatter?'checked':''}> splatter</label></td>
+      <td><label><input type="checkbox" data-cf="mixed" ${col.mixed?'checked':''}> mixed</label></td>
+      <td><span class="colornote ${r.status==='check'?'bad':''}">${note}</span>${fix}</td>
+      <td><button class="rm" data-colrm="${i}" title="Remove this color">✕</button></td></tr>`;
+  }).join('');
+  p.innerHTML=`
+    <h2>${isNew?'New BOM card':'Edit '+escH(bomEdit.orig)} <span class="h2sub">${c.edited_at?'last edited here '+fmtDate(c.edited_at):''}</span></h2>
+    <div class="bomgrid">
+      <label>SKU (MOD SKU)<input type="text" data-f="sku" value="${escH(c.sku)}" ${isNew?'':'disabled title="SKU is the link to the schedule, so it cannot be renamed. Create a new card instead."'}></label>
+      <label>Manufacturer<input type="text" data-f="mfr" value="${escH(c.mfr||'')}"></label>
+      <label>Model<input type="text" data-f="model" value="${escH(c.model||'')}"></label>
+      <label>Design name<input type="text" data-f="design" value="${escH(c.design||'')}"></label>
+      <label>Caliber<input type="text" data-f="caliber" value="${escH(c.caliber||'')}"></label>
+    </div>
+    <label style="font-size:.7rem;color:var(--paper-dim);text-transform:uppercase;letter-spacing:.04em;">Description / process steps</label>
+    <textarea class="bomdesc" data-f="description">${escH(c.description||'')}</textarea>
+    <div class="toolbar" style="margin-top:10px;">
+      <button class="btn-ghost" id="bomDetect">Detect colors from description</button>
+      <button class="btn-ghost" id="bomAddColor">+ Add color</button>
+      <span class="colornote">Detecting replaces the color list below with what it finds in the description.</span>
+    </div>
+    <table class="coloredit"><thead><tr><th>Code</th><th>Color name</th><th>Part</th><th></th><th></th><th>Check</th><th></th></tr></thead><tbody>${rows||'<tr><td colspan="7" class="colornote">No colors yet.</td></tr>'}</tbody></table>
+    <div class="toolbar" style="margin-top:14px;">
+      <button class="btn" id="bomSave">${isNew?'Create card':'Save changes'}</button>
+      <button class="btn-ghost" id="bomCancel">Cancel</button>
+      ${isNew?'':'<button class="btn-ghost" id="bomDup">Duplicate as new card</button><button class="btn-ghost" id="bomDelete" style="margin-left:auto;">Delete card</button>'}
+    </div>`;
+}
+// Read-modify-write against the newest saved list so two people editing different cards don't overwrite each other.
+async function commitBomChange(mutator){
+  const latest = await storeGet('bom_data');
+  let list = Array.isArray(latest) ? latest.slice() : APP.bom.slice();
+  list = mutator(list);
+  if(JSON.stringify(list).length > 900000) toast('Warning: BOM data is nearing the Firestore size limit — tell whoever maintains the tool');
+  APP.bom = list; rebuildBomIndex();
+  APP.meta.bom_updated = new Date().toISOString();
+  await storeSet('bom_data', APP.bom); await storeSet('meta', APP.meta);
+  populateManualSkuSelect(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderBomLibrary();
+}
+function bomLinkedRows(sku){ return APP.schedule.filter(r=>(APP.rowStateMap[rsKey(r)]?.matchedSku ?? r.matched_sku)===sku).length; }
+async function saveBomEditor(){
+  const {orig,card}=bomEdit; card.sku=String(card.sku||'').trim();
+  if(!card.sku){ toast('Enter a SKU'); return; }
+  if(!orig && APP.bom.some(b=>b.sku.toLowerCase()===card.sku.toLowerCase())){ toast('That SKU already exists'); return; }
+  card.colors=card.colors.filter(c=>String(c.code||'').trim()).map(c=>({...c, code:String(c.code).trim().toUpperCase(), name:String(c.name||'').trim()}));
+  card.site_edited=true; card.edited_at=new Date().toISOString();
+  await commitBomChange(list=>{
+    const i=list.findIndex(b=>b.sku===card.sku);
+    if(i>=0) list[i]=card; else list.push(card);
+    return list;
+  });
+  bomEdit=null; renderBomEditor(); toast(`Saved ${card.sku}`);
+}
+async function deleteBomCard(){
+  const sku=bomEdit.orig, n=bomLinkedRows(sku);
+  if(!confirm(`Delete BOM card ${sku}?` + (n?`\n\n${n} schedule row(s) are linked to it and will lose their paint estimate until re-matched.`:'') + `\n\nThis is saved for everyone.`)) return;
+  await commitBomChange(list=>list.filter(b=>b.sku!==sku));
+  bomEdit=null; renderBomEditor(); toast(`Deleted ${sku}`);
+}
+
+document.getElementById('bomSearch').addEventListener('input', renderBomLibrary);
+document.getElementById('bomFilter').addEventListener('change', renderBomLibrary);
+document.getElementById('bomNewBtn').addEventListener('click', ()=>openBomEditor(null));
+document.getElementById('bomLibBody').addEventListener('click', e=>{
+  const b=e.target.closest('[data-bomedit]'); if(b) openBomEditor(b.dataset.bomedit);
+});
+(function(){
+  const p=document.getElementById('bomEditorPanel');
+  p.addEventListener('input', e=>{
+    if(!bomEdit) return;
+    const t=e.target, c=bomEdit.card;
+    if(t.dataset.f){ c[t.dataset.f]=t.value; return; }
+    if(t.dataset.cf){
+      const i=+t.closest('tr').dataset.ci, f=t.dataset.cf, col=c.colors[i];
+      col[f] = t.type==='checkbox' ? t.checked : (f==='part' ? (t.value||null) : t.value);
+      if(f==='code' || f==='name'){
+        // live-update the check note without re-rendering (keeps cursor position)
+        const r=checkColor(col), note=t.closest('tr').querySelector('.colornote');
+        note.textContent=r.msg; note.classList.toggle('bad', r.status==='check');
+      }
+    }
+  });
+  p.addEventListener('click', async e=>{
+    if(!bomEdit) return;
+    const t=e.target, c=bomEdit.card;
+    if(t.id==='bomCancel'){ bomEdit=null; renderBomEditor(); return; }
+    if(t.id==='bomSave'){ await saveBomEditor(); return; }
+    if(t.id==='bomDelete'){ await deleteBomCard(); return; }
+    if(t.id==='bomDup'){ const copy=JSON.parse(JSON.stringify(c)); copy.sku=''; delete copy.edited_at; bomEdit={orig:null,card:copy}; renderBomEditor(); toast('Enter a new SKU for the copy'); return; }
+    if(t.id==='bomAddColor'){ c.colors.push({code:'',name:'',part:null,splatter:false,mixed:false}); renderBomEditor(); return; }
+    if(t.id==='bomDetect'){
+      const found=detectColorsFromText(c.description);
+      if(!found.length){ toast('No paint codes found in the description'); return; }
+      c.colors=found; renderBomEditor(); toast(`Detected ${found.length} color${found.length===1?'':'s'}`); return;
+    }
+    if(t.dataset.colrm!==undefined){ c.colors.splice(+t.dataset.colrm,1); renderBomEditor(); return; }
+    if(t.dataset.colfix!==undefined){ const col=c.colors[+t.dataset.colfix]; col.name=checkColor(col).official; renderBomEditor(); return; }
+    if(t.dataset.colfixcode!==undefined){ const col=c.colors[+t.dataset.colfixcode]; col.code=checkColor(col).suggestCode; renderBomEditor(); return; }
+  });
+})();
+
 function populateManualSkuSelect(){
   manualSkuSel.innerHTML = '<option value="">Select a SKU...</option>';
   APP.bom.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).forEach(b=>{
@@ -1055,13 +1311,20 @@ document.getElementById('importBom').addEventListener('change', async e=>{
     const wb = XLSX.read(data, {type:'array'});
     const knownBefore = new Set(allInvCodes());
     APP.bom = parseBomWorkbook(wb);
+    const siteEdited = (await storeGet('bom_data') || []).filter(b=>b.site_edited);
+    let keptEdits = 0;
+    if(siteEdited.length && confirm(`${siteEdited.length} BOM card(s) were edited or created on the site.\n\nOK = keep those versions and use the file for everything else.\nCancel = replace everything with the file (site edits are lost).`)){
+      const bySku = Object.fromEntries(APP.bom.map(b=>[b.sku,b]));
+      siteEdited.forEach(b=>{ bySku[b.sku]=b; });
+      APP.bom = Object.values(bySku); keptEdits = siteEdited.length;
+    }
     rebuildBomIndex();
     const newColors = allInvCodes().filter(c=>!knownBefore.has(c)).length;
     APP.meta.bom_updated = new Date().toISOString();
     await storeSet('bom_data', APP.bom);
     await storeSet('meta', APP.meta);
-    populateManualSkuSelect(); buildRowStates(); renderSchedule(); updateMetaLabels();
-    toast(`BOM cards updated — ${APP.bom.length} SKUs parsed` + (newColors ? `, ${newColors} new paint color${newColors===1?'':'s'} added to inventory at 0 mL` : ''));
+    populateManualSkuSelect(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderBomLibrary();
+    toast(`BOM cards updated — ${APP.bom.length} SKUs` + (keptEdits?`, kept ${keptEdits} edited here`:'') + (newColors ? `, ${newColors} new paint color${newColors===1?'':'s'} added to inventory at 0 mL` : ''));
   }catch(err){ toast('Could not read that file — check it matches the BOM Cards format'); }
   e.target.value='';
 });
@@ -1107,6 +1370,7 @@ document.querySelectorAll('.tabbtn').forEach(btn=>{
     document.querySelectorAll('.tabbtn').forEach(b=>b.classList.toggle('active', b===btn));
     document.querySelectorAll('.tabpage').forEach(p=>p.classList.toggle('active', p.id==='tab-'+btn.dataset.tab));
     if(btn.dataset.tab==='inventory') renderInventory();
+    if(btn.dataset.tab==='bom') renderBomLibrary();
   });
 });
 
