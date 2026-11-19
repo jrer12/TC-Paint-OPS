@@ -140,6 +140,14 @@
   #loadingScreen{position:fixed;inset:0;background:var(--steel-950);display:flex;align-items:center;justify-content:center;
     flex-direction:column;gap:10px;z-index:100;}
   #loadingScreen .l{color:var(--paper-dim);font-size:.9rem;}
+  #loginScreen{position:fixed;inset:0;background:var(--steel-950);display:flex;align-items:center;justify-content:center;z-index:60;padding:16px;}
+  #loginForm{background:var(--steel-900);border:1px solid var(--steel-700);border-top:3px solid var(--safety);border-radius:6px;padding:26px 28px;width:100%;max-width:360px;display:flex;flex-direction:column;gap:12px;}
+  #loginForm h1{font-size:1.2rem;margin:0;}
+  #loginForm .sub{color:var(--paper-dim);font-size:.82rem;}
+  #loginForm label{display:flex;flex-direction:column;gap:4px;font-size:.72rem;color:var(--paper-dim);text-transform:uppercase;letter-spacing:.04em;}
+  #loginForm input{text-transform:none;letter-spacing:0;font-size:.9rem;padding:8px 10px;}
+  #loginForm .msg{min-height:1.2em;font-size:.8rem;color:#e08c86;}
+  #loginForm .msg.ok{color:#8fbb8f;}
 
   @media print{
     body{background:#fff;color:#000;}
@@ -152,6 +160,17 @@
 <body>
 
 <div id="loadingScreen"><div class="l">Loading shared paint ops data…</div></div>
+<div id="loginScreen" style="display:none;">
+  <form id="loginForm" autocomplete="on">
+    <h1>Paint Ops Planner</h1>
+    <div class="sub">Sign in with the account your admin created for you.</div>
+    <label>Email<input type="text" id="loginEmail" autocomplete="username" inputmode="email"></label>
+    <label>Password<input type="password" id="loginPassword" autocomplete="current-password"></label>
+    <div id="loginMsg" class="msg"></div>
+    <button class="btn" type="submit" id="loginBtn">Sign in</button>
+    <button class="btn-ghost" type="button" id="loginReset">Forgot password? Email me a reset link</button>
+  </form>
+</div>
 
 <div class="wrap" id="mainWrap" style="display:none;">
 
@@ -165,6 +184,7 @@
 
   <div class="tabs no-print">
     <button class="tabbtn active" data-tab="schedule">Build Plan</button>
+    <button class="tabbtn" data-tab="sched">Schedule Editor</button>
     <button class="tabbtn" data-tab="inventory">Paint Inventory</button>
     <button class="tabbtn" data-tab="bom">BOM Library</button>
     <button class="tabbtn" data-tab="data">Data &amp; Import</button>
@@ -244,6 +264,35 @@
       <br><br>
       <strong>This data is shared</strong> — every edit here (checkboxes, matched SKU, quantities) saves automatically and is visible to anyone who opens this same tool.
     </div>
+  </div>
+
+  <!-- ============ TAB: SCHEDULE EDITOR ============ -->
+  <div class="tabpage" id="tab-sched">
+    <div class="panel">
+      <h2>Schedule Editor <span class="h2sub" id="schedEdMeta"></span></h2>
+      <div class="toolbar">
+        <label>Month</label>
+        <select id="seMonth"><option value="">All</option></select>
+        <select id="seFilter">
+          <option value="all">All rows</option>
+          <option value="attn">Needs attention (no Type or no BOM match)</option>
+          <option value="site">Created / edited on this site</option>
+        </select>
+        <input type="text" id="seSearch" placeholder="Filter by SKU / design..." style="min-width:200px;">
+        <button class="btn" id="seNewBtn" style="margin-left:auto;">+ Add schedule row</button>
+      </div>
+      <div class="table-scroll" style="max-height:480px;">
+        <table>
+          <thead><tr><th>Month</th><th>MOD SKU</th><th>Gun / design</th><th style="text-align:right;">Ordered</th><th style="text-align:right;">Done</th><th style="text-align:right;">Left</th><th>Type</th><th style="text-align:right;">Priority</th><th>Status</th><th></th></tr></thead>
+          <tbody id="seBody"></tbody>
+        </table>
+      </div>
+      <div class="footnote" style="margin-top:10px;">
+        Ordered, Done, Type and Priority can be edited right in the table; use Edit for everything else. Changes save for everyone and flow straight into the Build Plan and Paint Inventory.
+        A row only counts toward paint demand if its Type contains PAINT and it matches a BOM card &mdash; rows missing either are flagged. Importing a schedule xlsx is still available on Data &amp; Import and will ask whether to keep rows created or edited here.
+      </div>
+    </div>
+    <div class="panel" id="seEditorPanel" style="display:none;"></div>
   </div>
 
   <!-- ============ TAB: INVENTORY ============ -->
@@ -374,7 +423,8 @@
 // "Your apps" → the web app (</>) → SDK setup and configuration.
 // =====================================================================
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
-import { getFirestore, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, collection, onSnapshot, writeBatch } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyCaes5VNDPDNt6ouy87OCfqHlxX2P-clSI",
@@ -387,6 +437,8 @@ const firebaseConfig = {
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp);
+const auth = getAuth(firebaseApp);
+const userEmail = () => (auth.currentUser && auth.currentUser.email) || 'unknown';
 const FS_COLLECTION = 'paint_ops';
 // =====================================================================
 
@@ -396,7 +448,9 @@ const SEED_INVENTORY = [{"code":"H-120","name":"SHAMROCK","current_ml":0},{"code
 const PART_ML = {frame:5, slide:3, barrel:2, mag_base_plate:2, small_parts:2};
 const PART_LABELS = {frame:'Frame', slide:'Slide', barrel:'Barrel', mag_base_plate:'Mag Base', small_parts:'Small Parts'};
 const ML_PER_GAL = 3785.411784;
-const CODE_FIXES = {'F-120':'H-120','FX-105':'F-105','FX-113':'F-113','H-316':'H-136'};
+// Auto-rewriting of codes is off: F-120, FX-105, FX-113 etc. are genuine Cerakote F/FX-series colors, and H-316 is a real color (Squatch Green).
+// Fix typos on the BOM card itself (BOM Library tab) instead.
+const CODE_FIXES = {};
 const PART_KEYWORDS = [
   [/\bframe\b/gi, 'frame'],
   [/\bslide\b/gi, 'slide'],
@@ -405,27 +459,116 @@ const PART_KEYWORDS = [
   [/\bsmall parts?\b|\btrigger\b|\bsafety\b|\bhammer\b|\bmag\s*release\b|\bslide catch\b|\btakedown lever\b|\boptics cover plate\b|\bbackplate\b|\blci\b|\bgrips?\b|\bcontrols?\b/gi, 'small_parts'],
 ];
 
-// ---------------- Firestore storage helpers (shared across everyone) ----------------
+// ---------------- Firestore storage (shared across everyone) ----------------
+// Small single-value docs (meta, qty_basis, inventory_raw) live in paint_ops/{key}.
+// Everything that grows is stored ONE DOCUMENT PER RECORD in its own collection, so saving a record writes only that record
+// and live listeners keep every open browser current:
+//   bom_cards/{sku}  schedule_rows/{month||sku}  row_state/{month||sku}  inv_overrides/{color code}  manual_plan/{sku}
 async function storeGet(key){
   try{
     const snap = await getDoc(doc(db, FS_COLLECTION, key));
     return snap.exists() ? snap.data().value : undefined;
   }catch(e){ console.error('Firestore read failed for', key, e); return undefined; }
 }
-async function storeSet(key, value){
-  try{ await setDoc(doc(db, FS_COLLECTION, key), { value, updatedAt: new Date().toISOString() }); }
-  catch(e){ console.error('Firestore write failed for', key, e); }
+const stripMeta = d => { const {_by,_at,...rest} = d; return rest; };
+const clean = o => JSON.parse(JSON.stringify(o));                 // drops undefined, turns Dates into strings
+const encId = s => encodeURIComponent(String(s)).replace(/\./g,'%2E');
+function canon(v){                                                  // key-order-independent JSON, so local and server copies compare equal
+  if(v===null || typeof v!=='object') return JSON.stringify(v===undefined?null:v);
+  if(Array.isArray(v)) return '['+v.map(canon).join(',')+']';
+  return '{'+Object.keys(v).filter(k=>v[k]!==undefined).sort().map(k=>JSON.stringify(k)+':'+canon(v[k])).join(',')+'}';
 }
-async function getOrSeed(key, seed){
-  const v = await storeGet(key);
-  if(v !== undefined) return v;
-  await storeSet(key, seed);
-  return seed;
+function ensureOrd(list){                                           // schedule rows keep their order through a numeric "ord" field
+  list.forEach((r,i)=>{
+    if(r.ord!=null) return;
+    let p=null, n=null;
+    for(let j=i-1;j>=0;j--) if(list[j].ord!=null){ p=list[j].ord; break; }
+    for(let j=i+1;j<list.length;j++) if(list[j].ord!=null){ n=list[j].ord; break; }
+    r.ord = (p!=null && n!=null) ? (p+n)/2 : (p!=null ? p+1024 : (n!=null ? n-1024 : i*1024));
+  });
+}
+function ensureUid(list){                                           // every schedule row gets a unique, permanent id (same SKU can appear twice in a month)
+  const used=new Set(list.filter(r=>r.uid).map(r=>r.uid));
+  list.forEach(r=>{
+    if(r.uid) return;
+    const base=r.month+'||'+r.mod_sku; let u=base, n=2;
+    while(used.has(u)) u=base+'#'+(n++);
+    used.add(u); r.uid=u;
+  });
+}
+const SYNC = {
+  bom_data:            {col:'bom_cards',     id:r=>r.sku,
+                        get:()=>APP.bom,                set:recs=>{ APP.bom = recs.sort((a,b)=>String(a.sku).localeCompare(String(b.sku))); rebuildBomIndex(); },
+                        seed:()=>SEED_BOM},
+  schedule_data:       {col:'schedule_rows', id:r=>rsKey(r),
+                        get:()=>APP.schedule,           set:recs=>{ APP.schedule = recs.sort((a,b)=>((a.ord??0)-(b.ord??0)) || rsKey(a).localeCompare(rsKey(b))); },
+                        prep:()=>{ ensureUid(APP.schedule); ensureOrd(APP.schedule); }, seed:()=>SEED_SCHEDULE},
+  schedule_row_state:  {col:'row_state',     id:r=>r._key,
+                        get:()=>Object.entries(APP.rowStateMap).map(([k,v])=>({...v,_key:k})),
+                        set:recs=>{ APP.rowStateMap = Object.fromEntries(recs.map(r=>{ const {_key,...st}=r; return [_key,st]; })); },
+                        seed:()=>({}), fromLegacy:v=>Object.entries(v||{}).map(([k,s])=>({...s,_key:k}))},
+  inventory_overrides: {col:'inv_overrides', id:r=>r._key,
+                        get:()=>Object.entries(APP.invOverrides).map(([k,v])=>({...v,_key:k})),
+                        set:recs=>{ APP.invOverrides = Object.fromEntries(recs.map(r=>{ const {_key,...o}=r; return [_key,o]; })); },
+                        seed:()=>({}), fromLegacy:v=>Object.entries(v||{}).map(([k,o])=>({...o,_key:k}))},
+  manual_plan:         {col:'manual_plan',   id:r=>r.sku,
+                        get:()=>APP.manualPlan,         set:recs=>{ APP.manualPlan = recs.sort((a,b)=>String(a.sku).localeCompare(String(b.sku))); },
+                        seed:()=>[]},
+};
+const lastSynced = {};            // key -> Map(logical id -> canonical json) as last seen on the server
+const syncTimers = {};
+function localMap(key){
+  const cfg=SYNC[key], m=new Map();
+  if(cfg.prep) cfg.prep();
+  cfg.get().forEach(r=>{ const c=clean(r), id=cfg.id(c); if(id!==undefined && id!==null && id!=='') m.set(id,c); });
+  return m;
+}
+// Write only what differs from the server copy: changed/new records are set, removed records are deleted.
+async function syncNow(key){
+  const cfg=SYNC[key]; if(!cfg || !lastSynced[key]) return;
+  const base=lastSynced[key], local=localMap(key), ops=[];
+  local.forEach((rec,id)=>{ const j=canon(rec); if(base.get(id)!==j) ops.push({t:'set',id,rec,j}); });
+  base.forEach((j,id)=>{ if(!local.has(id)) ops.push({t:'del',id}); });
+  if(!ops.length) return;
+  try{
+    const at=new Date().toISOString(), by=userEmail();
+    for(let i=0;i<ops.length;i+=400){
+      const b=writeBatch(db);
+      ops.slice(i,i+400).forEach(o=>{
+        const ref=doc(db, cfg.col, encId(o.id));
+        if(o.t==='set') b.set(ref, {...o.rec, _by:by, _at:at}); else b.delete(ref);
+      });
+      await b.commit();
+    }
+    if(lastSynced[key]===base) ops.forEach(o=>{ if(o.t==='set') base.set(o.id,o.j); else base.delete(o.id); });
+  }catch(e){
+    console.error('Firestore write failed for', key, e);
+    toast('Could not save — check your connection or sign-in, then try again');
+  }
+}
+async function storeSet(key, value){
+  if(SYNC[key]){ clearTimeout(syncTimers[key]); return syncNow(key); }
+  try{ await setDoc(doc(db, FS_COLLECTION, key), { value, updatedAt: new Date().toISOString() }); }
+  catch(e){ console.error('Firestore write failed for', key, e); toast('Could not save — check your connection or sign-in'); }
 }
 let saveTimers = {};
 function saveKey(key, value){
+  if(SYNC[key]){ clearTimeout(syncTimers[key]); syncTimers[key]=setTimeout(()=>syncNow(key), 350); return; }
   clearTimeout(saveTimers[key]);
   saveTimers[key] = setTimeout(()=>storeSet(key, value), 350);
+}
+// A snapshot from the server replaces our copy, EXCEPT records this browser changed but hasn't saved yet.
+function applySnapshot(key, recs){
+  const cfg=SYNC[key], remote=new Map(), newBase=new Map();
+  recs.forEach(r=>{ const id=cfg.id(r); if(id===undefined||id===null||id==='') return; remote.set(id,r); newBase.set(id,canon(r)); });
+  const base=lastSynced[key];
+  if(base){
+    const local=localMap(key);
+    local.forEach((rec,id)=>{ if(base.get(id)!==canon(rec)) remote.set(id,rec); });
+    base.forEach((j,id)=>{ if(!local.has(id)) remote.delete(id); });
+  }
+  lastSynced[key]=newBase;
+  cfg.set([...remote.values()]);
 }
 
 // ---------------- app state ----------------
@@ -663,7 +806,7 @@ function defaultParts(row){
   if(cm.includes('baseplate') || cm.includes('base plate')) set.add('mag_base_plate');
   return set;
 }
-function rsKey(row){ return row.month+'||'+row.mod_sku; }
+function rsKey(row){ return row.uid || (row.month+'||'+row.mod_sku); }
 
 let rowState = [];
 function buildRowStates(){
@@ -714,10 +857,218 @@ function colorAllocationForSku(sku, checkedParts){
 // ---------------- render: schedule/build plan ----------------
 const monthFilter = document.getElementById('monthFilter');
 function populateMonthFilter(){
+  const keepMonth = monthFilter.value;
   monthFilter.innerHTML = '<option value="">All</option>';
   [...new Set(APP.schedule.map(r=>r.month))].forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; monthFilter.appendChild(o); });
+  if([...monthFilter.options].some(o=>o.value===keepMonth)) monthFilter.value=keepMonth;
 }
 const manualSkuSel = document.getElementById('manualSku');
+// ================= SCHEDULE EDITOR =================
+const SE_TYPES = ['PAINT','PAINT, LASER','LASER','OTHER'];
+function matchBomSku(modSku){
+  const skus = APP.bom.map(b=>b.sku);
+  if(skus.includes(modSku)) return [modSku,1];
+  const n = normalizeSku(modSku), norm = {}; skus.forEach(s=>norm[normalizeSku(s)]=s);
+  if(norm[n]) return [norm[n],0.99];
+  let best=null, score=0;
+  Object.keys(norm).forEach(k=>{ const s=diceSim(n,k); if(s>score){ score=s; best=norm[k]; } });
+  return (best && score>=0.90) ? [best,+score.toFixed(2)] : [null,0];
+}
+function rowNeedsAttention(r){
+  const noType = !String(r.type||'').trim();
+  const eff = APP.rowStateMap[rsKey(r)]?.matchedSku ?? r.matched_sku;
+  return {noType, noMatch: !eff};
+}
+function seRowsFiltered(){
+  const m=document.getElementById('seMonth').value, f=document.getElementById('seFilter').value;
+  const q=(document.getElementById('seSearch').value||'').trim().toLowerCase();
+  return APP.schedule.filter(r=>{
+    if(m && r.month!==m) return false;
+    if(f==='attn'){ const a=rowNeedsAttention(r); if(!(a.noType||a.noMatch)) return false; }
+    if(f==='site' && !r.site_edited) return false;
+    if(!q) return true;
+    return [r.mod_sku,r.design,r.mfr,r.model].join(' ').toLowerCase().includes(q);
+  });
+}
+function populateSeMonth(){
+  const sel=document.getElementById('seMonth'), cur=sel.value;
+  sel.innerHTML='<option value="">All</option>'+[...new Set(APP.schedule.map(r=>r.month))].map(m=>`<option value="${escH(m)}">${escH(m)}</option>`).join('');
+  sel.value=[...sel.options].some(o=>o.value===cur)?cur:'';
+}
+function renderSchedEditor(){
+  const body=document.getElementById('seBody'); if(!body) return;
+  populateSeMonth();
+  const attn=APP.schedule.filter(r=>{ const a=rowNeedsAttention(r); return a.noType||a.noMatch; }).length;
+  document.getElementById('schedEdMeta').textContent=`${APP.schedule.length} rows · ${attn} need attention · ${APP.schedule.filter(r=>r.site_edited).length} edited here`;
+  const rows=seRowsFiltered();
+  body.innerHTML = rows.length ? rows.map(r=>{
+    const key=rsKey(r), a=rowNeedsAttention(r);
+    const left = r.ordered!==null ? Math.max((r.ordered||0)-(r.completed||0),0) : '';
+    const typeVal=String(r.type||'');
+    const opts=['',...SE_TYPES]; if(typeVal && !opts.includes(typeVal)) opts.push(typeVal);
+    return `<tr data-key="${escH(key)}">
+      <td>${escH(String(r.month).replace(' 2026',''))}</td>
+      <td><span class="code">${escH(r.mod_sku)}</span>${r.site_edited?' <span class="flag mixed">edited</span>':''}
+        ${a.noMatch?'<div class="no-match">no BOM card</div>':''}</td>
+      <td>${escH(r.mfr||'')} ${escH(r.model||'')}<div style="color:var(--paper-dim);font-size:.72rem;">${escH(r.design||'')}</div></td>
+      <td class="num"><input type="number" min="0" style="width:70px;" data-sef="ordered" value="${r.ordered??''}"></td>
+      <td class="num"><input type="number" min="0" style="width:70px;" data-sef="completed" value="${r.completed??''}"></td>
+      <td class="num">${left}</td>
+      <td><select data-sef="type">${opts.map(o=>`<option value="${escH(o)}" ${o===typeVal?'selected':''}>${o?escH(o):'— none —'}</option>`).join('')}</select>
+        ${a.noType?'<div class="no-match">no Type — not counted</div>':''}</td>
+      <td class="num"><input type="number" min="0" style="width:60px;" data-sef="priority" value="${r.priority??''}"></td>
+      <td style="font-size:.72rem;color:var(--paper-dim);">${escH(r.section||'')}</td>
+      <td><button class="btn-ghost" data-seedit="${escH(key)}">Edit</button></td></tr>`;
+  }).join('') : '<tr><td colspan="10" class="colornote">No rows match.</td></tr>';
+}
+
+// Each schedule row is its own Firestore document, so only the rows you changed are written.
+async function commitScheduleChange(mutator){
+  let list = APP.schedule.map(r=>({...r}));
+  list = mutator(list);
+  APP.schedule = list;
+  APP.meta.schedule_updated = new Date().toISOString();
+  await storeSet('schedule_data', APP.schedule); await storeSet('meta', APP.meta);
+  populateMonthFilter(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderSchedEditor();
+}
+function recomputeRow(r){
+  r.ordered = (r.ordered===''||r.ordered==null||isNaN(r.ordered)) ? null : +r.ordered;
+  r.completed = (r.completed===''||r.completed==null||isNaN(r.completed)) ? null : +r.completed;
+  r.priority = (r.priority===''||r.priority==null||isNaN(r.priority)) ? null : +r.priority;
+  r.remaining = r.ordered!==null ? Math.max(r.ordered-(r.completed||0),0) : null;
+  const [m,score]=matchBomSku(r.mod_sku); r.matched_sku=m; r.match_score=score;
+  return r;
+}
+function dropPartsState(key){ if(APP.rowStateMap[key]){ delete APP.rowStateMap[key].parts; saveKey('schedule_row_state', APP.rowStateMap); } }
+
+let seEdit=null;   // {origKey|null, row}
+function openSeEditor(key){
+  const base = key ? APP.schedule.find(r=>rsKey(r)===key) : null;
+  const curMonth = document.getElementById('seMonth').value || (APP.schedule.length ? APP.schedule[APP.schedule.length-1].month : '');
+  const row = base ? {...base} : {month:curMonth, section:'MAIN', mfr:'', model:'', design:'', mod_sku:'', ordered:null, completed:0, frames:'', slides:'', controls:'', type:'PAINT', comments:'', priority:null};
+  seEdit={origKey:key||null, row, origFlags: base ? JSON.stringify([base.type,base.frames,base.slides,base.controls,base.comments]) : null};
+  renderSeEditor();
+  const p=document.getElementById('seEditorPanel'); p.style.display='block'; p.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function renderSeEditor(){
+  const p=document.getElementById('seEditorPanel'); if(!seEdit){ p.style.display='none'; return; }
+  const r=seEdit.row, isNew=!seEdit.origKey;
+  const yn=v=>['','YES','NO'].map(o=>`<option value="${o}" ${String(v||'').toUpperCase()===o?'selected':''}>${o||'—'}</option>`).join('');
+  const typeVal=String(r.type||''); const opts=['',...SE_TYPES]; if(typeVal && !opts.includes(typeVal)) opts.push(typeVal);
+  const months=[...new Set(APP.schedule.map(x=>x.month))];
+  const [m]=matchBomSku(r.mod_sku||'');
+  p.innerHTML=`
+    <h2>${isNew?'New schedule row':'Edit '+escH(seEdit.origKey.replace('||',' · '))}</h2>
+    <div class="bomgrid">
+      <label>Month<input type="text" data-sf="month" list="seMonths" value="${escH(r.month)}" placeholder="e.g. December 2026"></label>
+      <label>List<select data-sf="section">${['MAIN','CARRYOVER','UNALLOCATED'].map(s=>`<option ${r.section===s?'selected':''}>${s}</option>`).join('')}</select></label>
+      <label>MOD SKU<input type="text" data-sf="mod_sku" list="seSkus" value="${escH(r.mod_sku)}" placeholder="start typing a BOM SKU"></label>
+      <label>Manufacturer<input type="text" data-sf="mfr" value="${escH(r.mfr||'')}"></label>
+      <label>Model<input type="text" data-sf="model" value="${escH(r.model||'')}"></label>
+      <label>Design<input type="text" data-sf="design" value="${escH(r.design||'')}"></label>
+      <label>Ordered units<input type="number" min="0" data-sf="ordered" value="${r.ordered??''}"></label>
+      <label>Completed<input type="number" min="0" data-sf="completed" value="${r.completed??''}"></label>
+      <label>Priority<input type="number" min="0" data-sf="priority" value="${r.priority??''}"></label>
+      <label>Type<select data-sf="type">${opts.map(o=>`<option value="${escH(o)}" ${o===typeVal?'selected':''}>${o?escH(o):'— none —'}</option>`).join('')}</select></label>
+      <label>Frames painted<select data-sf="frames">${yn(r.frames)}</select></label>
+      <label>Slides painted<select data-sf="slides">${yn(r.slides)}</select></label>
+      <label>Controls / small parts<select data-sf="controls">${yn(r.controls)}</select></label>
+    </div>
+    <datalist id="seMonths">${months.map(x=>`<option value="${escH(x)}">`).join('')}</datalist>
+    <datalist id="seSkus">${APP.bom.map(b=>`<option value="${escH(b.sku)}">${escH((b.mfr||'')+' '+(b.model||'')+' — '+(b.design||''))}</option>`).join('')}</datalist>
+    <label style="font-size:.7rem;color:var(--paper-dim);text-transform:uppercase;letter-spacing:.04em;">Comments (mention barrel / baseplate to add those parts)</label>
+    <textarea class="bomdesc" style="min-height:70px;" data-sf="comments">${escH(r.comments||'')}</textarea>
+    <div class="colornote" id="seMatchNote" style="margin:8px 0;">${m?`Matches BOM card <span class="code">${escH(m)}</span>.`:'<span class="no-match">No BOM card matches this SKU yet — add it on the BOM Library tab.</span>'}</div>
+    <div class="toolbar">
+      <button class="btn" id="seSave">${isNew?'Add row':'Save changes'}</button>
+      <button class="btn-ghost" id="seCancel">Cancel</button>
+      ${isNew?'':'<button class="btn-ghost" id="seDelete" style="margin-left:auto;">Delete row</button>'}
+    </div>`;
+}
+async function saveSeEditor(){
+  const {origKey,row,origFlags}=seEdit;
+  row.mod_sku=String(row.mod_sku||'').trim(); row.month=String(row.month||'').trim();
+  if(!row.mod_sku || !row.month){ toast('Month and MOD SKU are required'); return; }
+  const newKey=rsKey(row);
+  const oldRow = origKey ? APP.schedule.find(r=>rsKey(r)===origKey) : null;
+  const moved = !oldRow || oldRow.month!==row.month || oldRow.mod_sku!==row.mod_sku;
+  if(moved && APP.schedule.some(r=>r!==oldRow && r.month===row.month && r.mod_sku===row.mod_sku)){ toast('That SKU is already on the schedule for that month'); return; }
+  recomputeRow(row); row.site_edited=true; row.edited_by=userEmail(); if(!origKey) row.site_created=true;
+  const skuChanged = oldRow && oldRow.mod_sku!==row.mod_sku;
+  await commitScheduleChange(list=>{
+    if(origKey){
+      const i=list.findIndex(r=>rsKey(r)===origKey);
+      if(i>=0) list[i]={...list[i],...row};
+      else list.push(row);
+    }else{
+      let at=-1; list.forEach((r,i)=>{ if(r.month===row.month) at=i; });
+      if(at>=0) list.splice(at+1,0,row); else list.push(row);
+    }
+    return list;
+  });
+  // keep Build Plan choices (include / parts / qty) attached when a row is moved to another month or renamed
+  if(origKey && newKey!==origKey && APP.rowStateMap[origKey]){
+    const st=APP.rowStateMap[origKey]; delete APP.rowStateMap[origKey];
+    if(skuChanged) delete st.matchedSku;
+    APP.rowStateMap[newKey]=st;
+  }
+  let note='';
+  if(origKey && origFlags && origFlags!==JSON.stringify([row.type,row.frames,row.slides,row.controls,row.comments])){ dropPartsState(newKey); note=' — parts painted reset from the Type/Frames/Slides/Controls flags'; }
+  if(skuChanged && APP.rowStateMap[newKey]) delete APP.rowStateMap[newKey].matchedSku;
+  saveKey('schedule_row_state', APP.rowStateMap);
+  buildRowStates(); renderSchedule(); renderSchedEditor();
+  seEdit=null; renderSeEditor(); toast(`Saved ${row.mod_sku}${note}`);
+}
+async function deleteSeRow(){
+  const key=seEdit.origKey;
+  if(!confirm(`Delete ${key.replace('||',' · ')} from the schedule?\n\nThis is saved for everyone.`)) return;
+  await commitScheduleChange(list=>list.filter(r=>rsKey(r)!==key));
+  delete APP.rowStateMap[key]; saveKey('schedule_row_state', APP.rowStateMap);
+  buildRowStates(); renderSchedule(); renderSchedEditor();
+  seEdit=null; renderSeEditor(); toast('Row deleted');
+}
+
+['seMonth','seFilter'].forEach(id=>document.getElementById(id).addEventListener('change', renderSchedEditor));
+document.getElementById('seSearch').addEventListener('input', renderSchedEditor);
+document.getElementById('seNewBtn').addEventListener('click', ()=>openSeEditor(null));
+document.getElementById('seBody').addEventListener('click', e=>{ const b=e.target.closest('[data-seedit]'); if(b) openSeEditor(b.dataset.seedit); });
+document.getElementById('seBody').addEventListener('change', async e=>{
+  const t=e.target, f=t.dataset.sef; if(!f) return;
+  const key=t.closest('tr').dataset.key;
+  const val = f==='type' ? t.value : (t.value===''?null:+t.value);
+  const before=APP.schedule.find(r=>rsKey(r)===key);
+  const typeChanged = f==='type' && before && String(before.type||'')!==val;
+  await commitScheduleChange(list=>{
+    const r=list.find(x=>rsKey(x)===key); if(!r) return list;
+    r[f]=val; recomputeRow(r); r.site_edited=true; r.edited_by=userEmail(); return list;
+  });
+  if(typeChanged){ dropPartsState(key); buildRowStates(); renderSchedule(); renderSchedEditor(); toast('Type changed — parts painted reset from the row flags'); }
+});
+(function(){
+  const p=document.getElementById('seEditorPanel');
+  p.addEventListener('input', e=>{
+    if(!seEdit) return; const t=e.target, f=t.dataset.sf; if(!f) return;
+    seEdit.row[f]=t.value;
+    if(f==='mod_sku'){
+      const card=APP.bomBySku[t.value.trim()];
+      if(card){ // fill the descriptive fields from the BOM card
+        const r=seEdit.row; r.mfr=card.mfr||''; r.model=card.model||''; r.design=card.design||'';
+        ['mfr','model','design'].forEach(k=>{ const el=p.querySelector(`[data-sf=${k}]`); if(el) el.value=r[k]; });
+      }
+      const [m]=matchBomSku(t.value.trim());
+      document.getElementById('seMatchNote').innerHTML = m?`Matches BOM card <span class="code">${escH(m)}</span>.`:'<span class="no-match">No BOM card matches this SKU yet — add it on the BOM Library tab.</span>';
+    }
+  });
+  p.addEventListener('change', e=>{ if(seEdit && e.target.tagName==='SELECT' && e.target.dataset.sf) seEdit.row[e.target.dataset.sf]=e.target.value; });
+  p.addEventListener('click', async e=>{
+    if(!seEdit) return; const id=e.target.id;
+    if(id==='seCancel'){ seEdit=null; renderSeEditor(); }
+    else if(id==='seSave') await saveSeEditor();
+    else if(id==='seDelete') await deleteSeRow();
+  });
+})();
+
+
 
 // ================= BOM LIBRARY: official color reference + editor =================
 // Source: Cerakote H-Series technical data sheet (2021). Newer colors and F/FX codes are not on it, so they show as "unverified".
@@ -736,7 +1087,7 @@ function namesAgree(a,b){
 function checkColor(c){
   const code=(c.code||'').toUpperCase();
   const official = OFFICIAL_H[code];
-  if(!official) return {status:'unverified', msg:'Not on the 2021 Cerakote H-Series list (newer color or F/FX series).'};
+  if(!official) return {status:'unverified', msg:'Not on the 2021 Cerakote H-Series list (a newer color, or an F/FX-series code).'};
   if(!c.name) return {status:'noname', official, msg:`${code} is ${official}.`};
   if(namesAgree(c.name, official)) return {status:'ok', official, msg:`${code} = ${official}`};
   const otherCode = OFFICIAL_BY_NAME[normName(c.name)];
@@ -834,7 +1185,7 @@ function renderBomEditor(){
       <td><button class="rm" data-colrm="${i}" title="Remove this color">✕</button></td></tr>`;
   }).join('');
   p.innerHTML=`
-    <h2>${isNew?'New BOM card':'Edit '+escH(bomEdit.orig)} <span class="h2sub">${c.edited_at?'last edited here '+fmtDate(c.edited_at):''}</span></h2>
+    <h2>${isNew?'New BOM card':'Edit '+escH(bomEdit.orig)} <span class="h2sub">${c.edited_at?'last edited '+fmtDate(c.edited_at)+(c.edited_by?' by '+escH(c.edited_by):''):''}</span></h2>
     <div class="bomgrid">
       <label>SKU (MOD SKU)<input type="text" data-f="sku" value="${escH(c.sku)}" ${isNew?'':'disabled title="SKU is the link to the schedule, so it cannot be renamed. Create a new card instead."'}></label>
       <label>Manufacturer<input type="text" data-f="mfr" value="${escH(c.mfr||'')}"></label>
@@ -856,12 +1207,10 @@ function renderBomEditor(){
       ${isNew?'':'<button class="btn-ghost" id="bomDup">Duplicate as new card</button><button class="btn-ghost" id="bomDelete" style="margin-left:auto;">Delete card</button>'}
     </div>`;
 }
-// Read-modify-write against the newest saved list so two people editing different cards don't overwrite each other.
+// Each card is its own Firestore document, so only the cards you changed are written.
 async function commitBomChange(mutator){
-  const latest = await storeGet('bom_data');
-  let list = Array.isArray(latest) ? latest.slice() : APP.bom.slice();
+  let list = APP.bom.map(b=>({...b}));
   list = mutator(list);
-  if(JSON.stringify(list).length > 900000) toast('Warning: BOM data is nearing the Firestore size limit — tell whoever maintains the tool');
   APP.bom = list; rebuildBomIndex();
   APP.meta.bom_updated = new Date().toISOString();
   await storeSet('bom_data', APP.bom); await storeSet('meta', APP.meta);
@@ -873,7 +1222,7 @@ async function saveBomEditor(){
   if(!card.sku){ toast('Enter a SKU'); return; }
   if(!orig && APP.bom.some(b=>b.sku.toLowerCase()===card.sku.toLowerCase())){ toast('That SKU already exists'); return; }
   card.colors=card.colors.filter(c=>String(c.code||'').trim()).map(c=>({...c, code:String(c.code).trim().toUpperCase(), name:String(c.name||'').trim()}));
-  card.site_edited=true; card.edited_at=new Date().toISOString();
+  card.site_edited=true; card.edited_at=new Date().toISOString(); card.edited_by=userEmail();
   await commitBomChange(list=>{
     const i=list.findIndex(b=>b.sku===card.sku);
     if(i>=0) list[i]=card; else list.push(card);
@@ -1296,7 +1645,8 @@ function updateMetaLabels(){
   document.getElementById('scheduleMeta').textContent = `${APP.schedule.length} rows · updated ${fmtDate(APP.meta.schedule_updated)}`;
   document.getElementById('inventoryMeta').textContent = `${APP.invRaw.length} colors · updated ${fmtDate(APP.meta.inventory_updated)}`;
   document.getElementById('headerChips').innerHTML = `
-    <span class="stat-chip live">● Firebase — shared &amp; live</span>
+    <span class="stat-chip live">● Live — updates appear for everyone</span>
+    <span class="stat-chip">${escH(userEmail())}</span><button class="btn-ghost" id="signOutBtn" style="padding:3px 10px;">Sign out</button>
     <span class="stat-chip">${APP.schedule.length} schedule rows</span>
     <span class="stat-chip hi">${APP.schedule.filter(r=>r.matched_sku||APP.rowStateMap[rsKey(r)]?.matchedSku).length} linked to a BOM card</span>
     <span class="stat-chip">${APP.invRaw.length} colors in inventory</span>
@@ -1310,8 +1660,8 @@ document.getElementById('importBom').addEventListener('change', async e=>{
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data, {type:'array'});
     const knownBefore = new Set(allInvCodes());
+    const siteEdited = APP.bom.filter(b=>b.site_edited);
     APP.bom = parseBomWorkbook(wb);
-    const siteEdited = (await storeGet('bom_data') || []).filter(b=>b.site_edited);
     let keptEdits = 0;
     if(siteEdited.length && confirm(`${siteEdited.length} BOM card(s) were edited or created on the site.\n\nOK = keep those versions and use the file for everything else.\nCancel = replace everything with the file (site edits are lost).`)){
       const bySku = Object.fromEntries(APP.bom.map(b=>[b.sku,b]));
@@ -1319,6 +1669,8 @@ document.getElementById('importBom').addEventListener('change', async e=>{
       APP.bom = Object.values(bySku); keptEdits = siteEdited.length;
     }
     rebuildBomIndex();
+    APP.schedule.forEach(r=>{ const [m,s]=matchBomSku(r.mod_sku); r.matched_sku=m; r.match_score=s; });
+    await storeSet('schedule_data', APP.schedule);
     const newColors = allInvCodes().filter(c=>!knownBefore.has(c)).length;
     APP.meta.bom_updated = new Date().toISOString();
     await storeSet('bom_data', APP.bom);
@@ -1333,12 +1685,19 @@ document.getElementById('importSchedule').addEventListener('change', async e=>{
   try{
     const data = await file.arrayBuffer();
     const wb = XLSX.read(data, {type:'array', cellDates:true});
-    APP.schedule = parseScheduleWorkbook(wb, APP.bom);
+    const siteRows = APP.schedule.filter(r=>r.site_edited);
+    APP.schedule = parseScheduleWorkbook(wb, APP.bom); ensureUid(APP.schedule);
+    let keptRows = 0;
+    if(siteRows.length && confirm(`${siteRows.length} schedule row(s) were created or edited on the site.\n\nOK = keep those rows and use the file for everything else.\nCancel = replace the whole schedule with the file (site edits are lost).`)){
+      const byKey = new Map(APP.schedule.map(r=>[rsKey(r), r]));
+      siteRows.forEach(r=>byKey.set(rsKey(r), r));
+      APP.schedule = [...byKey.values()]; keptRows = siteRows.length;
+    }
     APP.meta.schedule_updated = new Date().toISOString();
     await storeSet('schedule_data', APP.schedule);
     await storeSet('meta', APP.meta);
-    populateMonthFilter(); buildRowStates(); renderSchedule(); updateMetaLabels();
-    toast(`Schedule updated — ${APP.schedule.length} rows, ${APP.schedule.filter(r=>r.matched_sku).length} auto-matched`);
+    populateMonthFilter(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderSchedEditor();
+    toast(`Schedule updated — ${APP.schedule.length} rows, ${APP.schedule.filter(r=>r.matched_sku).length} auto-matched` + (keptRows?`, kept ${keptRows} edited here`:''));
   }catch(err){ toast('Could not read that file — check it matches the schedule format'); }
   e.target.value='';
 });
@@ -1371,59 +1730,131 @@ document.querySelectorAll('.tabbtn').forEach(btn=>{
     document.querySelectorAll('.tabpage').forEach(p=>p.classList.toggle('active', p.id==='tab-'+btn.dataset.tab));
     if(btn.dataset.tab==='inventory') renderInventory();
     if(btn.dataset.tab==='bom') renderBomLibrary();
+    if(btn.dataset.tab==='sched') renderSchedEditor();
   });
 });
 
-// ---------------- boot ----------------
-async function boot(){
+// ---------------- live updates ----------------
+let appReady=false, unsubs=[], refreshT=null, refreshTries=0, running=null;
+function activeTabId(){ const p=document.querySelector('.tabpage.active'); return p ? p.id.replace('tab-','') : ''; }
+function userIsEditing(){
+  const a=document.activeElement;
+  return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest('#schedBody,#invBody,#seBody,#manualList'));
+}
+function scheduleRefresh(){ clearTimeout(refreshT); refreshT=setTimeout(doRefresh, 250); }
+function doRefresh(){
+  if(!appReady) return;
+  if(userIsEditing() && refreshTries<8){ refreshTries++; refreshT=setTimeout(doRefresh, 800); return; }   // don't yank a field out from under someone typing
+  refreshTries=0;
+  rebuildBomIndex(); populateMonthFilter(); populateManualSkuSelect(); buildRowStates();
+  renderSchedule(); renderManualList(); updateMetaLabels();
+  const t=activeTabId();
+  if(t==='inventory') renderInventory();
+  if(t==='bom') renderBomLibrary();
+  if(t==='sched') renderSchedEditor();
+  [...document.getElementById('qtyBasisSeg').children].forEach(b=>b.classList.toggle('active', b.dataset.v===APP.qtyBasis));
+}
+function stopListeners(){ unsubs.forEach(u=>{ try{u();}catch(e){} }); unsubs=[]; Object.keys(lastSynced).forEach(k=>delete lastSynced[k]); appReady=false; }
+function listen(ref, onData){
+  return new Promise((resolve,reject)=>{
+    let first=true;
+    unsubs.push(onSnapshot(ref, snap=>{
+      const info=onData(snap);
+      if(first){ first=false; resolve(info); } else if(appReady) scheduleRefresh();
+    }, err=>{ if(first){ first=false; reject(err); } else console.error('Live update failed', err); }));
+  });
+}
+async function startApp(){
+  stopListeners();
+  const initial = Object.keys(SYNC).map(key=>listen(collection(db, SYNC[key].col), snap=>{
+    const recs=[]; snap.forEach(d=>recs.push(stripMeta(d.data())));
+    applySnapshot(key, recs); return {key, empty:recs.length===0};
+  }));
+  const single = (k, apply)=>listen(doc(db, FS_COLLECTION, k), snap=>{ const v = snap.exists() ? snap.data().value : undefined; apply(v); return {key:k, exists:snap.exists()}; });
+  initial.push(single('meta', v=>{ APP.meta = v || {}; }));
+  initial.push(single('qty_basis', v=>{ APP.qtyBasis = v || 'remaining'; }));
+  initial.push(single('inventory_raw', v=>{ if(v!==undefined) APP.invRaw = v; }));
+  const results = await Promise.all(initial);
+
+  // One-time move from the old "one big document per list" layout (the old documents are left untouched as a backup).
+  const marker = await getDoc(doc(db, FS_COLLECTION, 'migrated_v2'));
+  if(!marker.exists()){
+    for(const r of results.filter(x=>SYNC[x.key] && x.empty)){
+      const cfg=SYNC[r.key], legacy=await storeGet(r.key);
+      const value = legacy!==undefined ? legacy : cfg.seed();
+      if(r.key==='schedule_row_state' || r.key==='inventory_overrides'){ cfg.set(cfg.fromLegacy(value)); }
+      else { const arr=value.map(x=>({...x})); if(r.key==='schedule_data'){ ensureUid(arr); ensureOrd(arr); } cfg.set(arr); }
+      await syncNow(r.key);
+    }
+    await setDoc(doc(db, FS_COLLECTION, 'migrated_v2'), {at:new Date().toISOString(), by:userEmail()});
+  }
+  const inv = results.find(x=>x.key==='inventory_raw');
+  if(inv && !inv.exists){ APP.invRaw = SEED_INVENTORY; await storeSet('inventory_raw', APP.invRaw); }
+
+  rebuildBomIndex();
+  populateMonthFilter(); populateManualSkuSelect(); buildRowStates();
+  [...document.getElementById('qtyBasisSeg').children].forEach(b=>b.classList.toggle('active', b.dataset.v===APP.qtyBasis));
+  renderSchedule(); renderManualList(); updateMetaLabels();
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('mainWrap').style.display='block';
+  appReady=true;
+}
+
+// ---------------- sign-in ----------------
+const loginMsg=(t,ok)=>{ const m=document.getElementById('loginMsg'); m.textContent=t||''; m.classList.toggle('ok',!!ok); };
+function showLogin(){
+  document.getElementById('mainWrap').style.display='none';
+  document.getElementById('loadingScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
+document.getElementById('loginForm').addEventListener('submit', async e=>{
+  e.preventDefault(); loginMsg('');
+  const email=document.getElementById('loginEmail').value.trim(), pw=document.getElementById('loginPassword').value;
+  if(!email||!pw){ loginMsg('Enter your email and password.'); return; }
+  const btn=document.getElementById('loginBtn'); btn.disabled=true;
+  try{ await signInWithEmailAndPassword(auth, email, pw); document.getElementById('loginPassword').value=''; }
+  catch(err){
+    const c=(err&&err.code)||'';
+    loginMsg(c==='auth/too-many-requests' ? 'Too many attempts — wait a few minutes or reset your password.'
+      : (c==='auth/network-request-failed' ? 'Network problem — check your connection.' : 'Email or password is incorrect.'));
+  }
+  btn.disabled=false;
+});
+document.getElementById('loginReset').addEventListener('click', async ()=>{
+  const email=document.getElementById('loginEmail').value.trim();
+  if(!email){ loginMsg('Type your email above first.'); return; }
+  try{ await sendPasswordResetEmail(auth, email); }catch(e){}
+  loginMsg('If that account exists, a reset link is on its way.', true);
+});
+document.getElementById('headerChips').addEventListener('click', async e=>{
+  if(e.target.id==='signOutBtn'){ try{ await signOut(auth); }catch(err){} }
+});
+
+function showBootError(title, color, body){
+  document.getElementById('loginScreen').style.display='none';
+  const ls=document.getElementById('loadingScreen'); ls.style.display='flex';
+  ls.innerHTML='<div class="l" style="max-width:480px;text-align:center;line-height:1.6;"><strong style="color:'+color+';">'+title+'</strong><br><br>'+body+'</div>';
+}
+function boot(){
   if(firebaseConfig.apiKey.includes('PASTE_YOUR')){
-    document.getElementById('loadingScreen').innerHTML =
-      '<div class="l" style="max-width:480px;text-align:center;line-height:1.6;">'
-      + '<strong style="color:#e8590c;">Firebase isn\'t set up yet.</strong><br><br>'
-      + 'Open this file in a text editor, find the <code style="color:#fff;">firebaseConfig</code> block near the top of the &lt;script&gt; section, '
-      + 'and paste in your project\'s config values from the Firebase console.'
-      + '</div>';
+    showBootError("Firebase isn't set up yet.", '#e8590c', 'Open this file in a text editor, find the <code style="color:#fff;">firebaseConfig</code> block near the top of the &lt;script&gt; section, and paste in your project\'s config values from the Firebase console.');
     return;
   }
-  try{
-  const [bom, schedule, invRaw, invOverrides, rowStateMap, manualPlan, qtyBasis, meta] = await Promise.all([
-    getOrSeed('bom_data', SEED_BOM),
-    getOrSeed('schedule_data', SEED_SCHEDULE),
-    getOrSeed('inventory_raw', SEED_INVENTORY),
-    getOrSeed('inventory_overrides', {}),
-    getOrSeed('schedule_row_state', {}),
-    getOrSeed('manual_plan', []),
-    getOrSeed('qty_basis', 'remaining'),
-    getOrSeed('meta', {}),
-  ]);
-  APP.bom = bom; rebuildBomIndex();
-  APP.schedule = schedule;
-  APP.invRaw = invRaw;
-  APP.invOverrides = invOverrides;
-  APP.rowStateMap = rowStateMap;
-  APP.manualPlan = manualPlan;
-  APP.qtyBasis = qtyBasis;
-  APP.meta = meta;
-
-  populateMonthFilter();
-  populateManualSkuSelect();
-  buildRowStates();
-  [...document.getElementById('qtyBasisSeg').children].forEach(b=>b.classList.toggle('active', b.dataset.v===APP.qtyBasis));
-  renderSchedule();
-  renderManualList();
-  updateMetaLabels();
-
-  document.getElementById('loadingScreen').style.display='none';
-  document.getElementById('mainWrap').style.display='block';
-  }catch(e){
-    console.error('Boot failed', e);
-    document.getElementById('loadingScreen').innerHTML =
-      '<div class="l" style="max-width:480px;text-align:center;line-height:1.6;">'
-      + '<strong style="color:#c0605a;">Couldn\'t connect to Firebase.</strong><br><br>'
-      + 'Check that your firebaseConfig values are correct and that Firestore is enabled '
-      + '(and in test/open rules) for this project. Error: ' + (e && e.message ? e.message : e)
-      + '</div>';
-  }
+  onAuthStateChanged(auth, async user=>{
+    if(!user){ stopListeners(); running=null; showLogin(); return; }
+    if(running===user.uid) return;
+    running=user.uid;
+    document.getElementById('loginScreen').style.display='none';
+    try{ await startApp(); }
+    catch(e){
+      console.error('Start failed', e); running=null;
+      const denied = e && /permission|insufficient/i.test(String(e.code||'')+' '+String(e.message||''));
+      showBootError("Couldn't load the shared data.", '#c0605a',
+        denied ? 'Your account is signed in, but Firestore refused access. Check that the Firestore rules were published (see the setup steps) and try again.'
+               : 'Check your connection and try again. Error: ' + (e && e.message ? e.message : e));
+    }
+  });
 }
 boot();
 </script>
