@@ -35,12 +35,37 @@
   .tabpage.active{display:block;}
 
 
+
+  /* dashboard (TV) mode */
+  #apDashBar,#apLightbox{display:none;}
+  body.apdash header.top,body.apdash .tabs,body.apdash .ap-add,body.apdash #tab-active .panel>h2,body.apdash #tab-active .footnote,body.apdash .ap-tools,body.apdash #toast{display:none !important;}
+  body.apdash .wrap{max-width:none;padding:10px 18px;}
+  body.apdash #tab-active .panel{border:none;background:transparent;padding:0;}
+  body.apdash #apDashBar{display:flex;justify-content:space-between;align-items:center;margin:4px 0 14px;font-size:1.5rem;font-weight:700;}
+  body.apdash #apDashBar .colornote{font-size:.9rem;font-weight:400;}
+  body.apdash #apList{grid-template-columns:repeat(auto-fit,minmax(760px,1fr));gap:20px;}
+  body.apdash .ap-card{padding:18px;gap:20px;}
+  body.apdash .ap-pic{flex:0 0 380px;}
+  body.apdash .ap-pic .imgbox{width:380px;height:380px;}
+  body.apdash .ap-pic .orionname{font-size:.8rem;}
+  body.apdash .ap-title{font-size:1.7rem;}
+  body.apdash .ap-sub{font-size:1rem;}
+  body.apdash .ap-qty{margin:10px 0;}
+  body.apdash .ap-qty input{font-size:2.6rem;width:150px;border:none;background:transparent;pointer-events:none;color:var(--safety);}
+  body.apdash .ap-qty label{font-size:1.1rem;}
+  body.apdash .ap-desc{font-size:1rem;max-height:none;}
+  body.apdash .ap-colors{font-size:1.05rem;}
+  body.apdash .ap-colors td,body.apdash .ap-colors th{padding:6px 8px;}
+  #apLightbox{position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:9999;align-items:center;justify-content:center;flex-direction:column;cursor:zoom-out;padding:20px;}
+  #apLightbox.on{display:flex;}
+  #apLightbox img{max-width:94vw;max-height:84vh;background:#fff;border-radius:6px;object-fit:contain;}
+  #apLightbox div{color:#ddd;margin-top:12px;font-size:1rem;text-align:center;}
   .ap-add{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
   .ap-add select,.ap-add input{background:var(--steel-800);border:1px solid var(--steel-600);color:var(--paper);padding:7px 9px;border-radius:4px;font-size:.82rem;}
-  #apList{display:grid;grid-template-columns:repeat(auto-fill,minmax(520px,1fr));gap:16px;}
+  #apList{display:grid;grid-template-columns:repeat(auto-fill,minmax(640px,1fr));gap:16px;}
   .ap-card{background:var(--steel-900);border:1px solid var(--steel-700);border-radius:6px;padding:14px;display:flex;gap:14px;}
-  .ap-pic{flex:0 0 150px;display:flex;flex-direction:column;gap:6px;align-items:center;}
-  .ap-pic .imgbox{width:150px;height:150px;background:#fff;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .ap-pic{flex:0 0 250px;display:flex;flex-direction:column;gap:6px;align-items:center;}
+  .ap-pic .imgbox{width:250px;height:250px;background:#fff;border-radius:4px;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:zoom-in;}
   .ap-pic img{max-width:100%;max-height:100%;object-fit:contain;}
   .ap-pic .noimg{color:#777;font-size:.7rem;text-align:center;padding:8px;}
   .ap-pic .orionname{font-size:.66rem;color:var(--paper-dim);text-align:center;line-height:1.25;}
@@ -385,8 +410,10 @@
         <select id="apSku" style="min-width:300px;"></select>
         <input type="number" id="apQty" min="1" placeholder="Qty" style="width:90px;">
         <button class="btn" id="apAddBtn">+ Add to active projects</button>
+        <button class="btn-ghost" id="apDashBtn" title="Full-screen display for a shop-floor TV">Dashboard mode</button>
         <span class="colornote">Pick the SKUs you are building right now. Quantity starts from what the schedule still has remaining; change it any time. Shared with everyone signed in.</span>
       </div>
+      <div id="apDashBar"><span id="apDashTitle"></span><span><span class="colornote">Updates live &middot; press Esc to exit</span> <button class="btn-ghost" id="apDashExit">Exit dashboard</button></span></div>
       <div id="apList"></div>
       <div class="footnote" style="margin-top:12px;">Pictures come from Orion's Orion Exclusives page and are matched by SKU where possible. If a picture is missing or wrong, choose the right Orion item on the card, or paste an image link. Paint estimates use the same per-part allowances as the Build Plan.</div>
     </div>
@@ -1792,6 +1819,7 @@ function renderActiveProjects(){
   populateApSkuSelect();
   const total=APP.activeProjects.reduce((s,p)=>s+(Number(p.qty)||0),0);
   document.getElementById('apMeta').textContent = `${APP.activeProjects.length} project${APP.activeProjects.length===1?'':'s'} · ${total} guns`;
+  document.getElementById('apDashTitle').textContent = `In production now · ${APP.activeProjects.length} project${APP.activeProjects.length===1?'':'s'} · ${total} guns`;
   if(!APP.activeProjects.length){ list.innerHTML='<div class="ap-empty">No active projects yet. Pick a SKU above to add what you are building now.</div>'; return; }
   const orionOpts='<option value="">Auto-match</option><option value="none">No picture</option>'+Object.keys(ORION_MAP).sort().map(k=>`<option value="${escH(k)}">${escH(k)} — ${escH(ORION_MAP[k].n.slice(0,34))}</option>`).join('');
   list.innerHTML=APP.activeProjects.map(p=>{
@@ -1841,6 +1869,25 @@ apList.addEventListener('click', e=>{
 });
 apList.addEventListener('error', e=>{ if(e.target && e.target.dataset && e.target.dataset.apimg){ e.target.style.display='none'; const n=e.target.nextElementSibling; if(n) n.style.display='block'; } }, true);
 
+
+// dashboard mode + enlarge picture
+function setDash(on){
+  document.body.classList.toggle('apdash', on);
+  if(on){ try{ document.documentElement.requestFullscreen && document.documentElement.requestFullscreen().catch(()=>{}); }catch(e){} }
+  else if(document.fullscreenElement){ try{ document.exitFullscreen(); }catch(e){} }
+  renderActiveProjects();
+}
+document.getElementById('apDashBtn').addEventListener('click', ()=>setDash(true));
+document.getElementById('apDashExit').addEventListener('click', ()=>setDash(false));
+document.addEventListener('fullscreenchange', ()=>{ if(!document.fullscreenElement && document.body.classList.contains('apdash')) setDash(false); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape'){ const lb=document.getElementById('apLightbox'); if(lb.classList.contains('on')) lb.classList.remove('on'); else if(document.body.classList.contains('apdash')) setDash(false); } });
+document.getElementById('apLightbox').addEventListener('click', ()=>document.getElementById('apLightbox').classList.remove('on'));
+document.getElementById('apList').addEventListener('click', e=>{
+  const im=e.target.closest('.imgbox'); if(!im) return; const img=im.querySelector('img[data-apimg]'); if(!img || img.style.display==='none') return;
+  const lb=document.getElementById('apLightbox'); lb.querySelector('img').src=img.src;
+  const card=im.closest('.ap-card'); lb.querySelector('div').textContent=(card.querySelector('.ap-title').textContent||'')+' — reference picture';
+  lb.classList.add('on');
+});
 // ---------------- tabs ----------------
 document.querySelectorAll('.tabbtn').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -1978,5 +2025,6 @@ function boot(){
 }
 boot();
 </script>
+<div id="apLightbox"><img alt=""><div></div></div>
 </body>
 </html>
