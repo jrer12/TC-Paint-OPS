@@ -73,6 +73,8 @@
   .ap-title{font-weight:700;font-size:1rem;}
   .ap-sub{font-size:.76rem;color:var(--paper-dim);margin-bottom:8px;}
   .ap-qty{display:flex;align-items:center;gap:8px;margin:6px 0 8px;}
+  .apqty-n{font-size:2rem;font-weight:700;color:var(--safety);min-width:60px;}
+  body.apdash .apqty-n{font-size:3rem;}
   .ap-qty input{width:84px;font-size:1.3rem;font-weight:700;text-align:center;background:var(--steel-800);border:1px solid var(--safety);color:var(--paper);border-radius:4px;padding:4px;}
   .ap-desc{font-size:.76rem;color:var(--paper-dim);margin:8px 0;white-space:pre-wrap;max-height:110px;overflow:auto;border-left:2px solid var(--steel-700);padding-left:8px;}
   .ap-colors{width:100%;font-size:.76rem;border-collapse:collapse;}
@@ -275,21 +277,6 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h2>Add a one-off build <span class="h2sub">(not from the schedule)</span></h2>
-      <div class="manual-add no-print">
-        <div class="field" style="flex:2;">
-          <label for="manualSku">BOM SKU</label>
-          <select id="manualSku"><option value="">Select a SKU...</option></select>
-        </div>
-        <div class="field" style="max-width:90px;">
-          <label for="manualQty">Qty</label>
-          <input type="number" id="manualQty" value="1" min="1">
-        </div>
-        <button class="btn" id="manualAddBtn">Add</button>
-      </div>
-      <div id="manualList" style="margin-top:10px;"></div>
-    </div>
 
     <div class="panel">
       <h2>Combined paint list</h2>
@@ -331,7 +318,7 @@
       </div>
       <div class="table-scroll" style="max-height:480px;">
         <table>
-          <thead><tr><th>Month</th><th>MOD SKU</th><th>Gun / design</th><th style="text-align:right;">Ordered</th><th style="text-align:right;">Done</th><th style="text-align:right;">Left</th><th>Type</th><th style="text-align:right;">Priority</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th>Month</th><th>MOD SKU</th><th>Gun / design</th><th style="text-align:right;">Ordered</th><th style="text-align:right;">Done</th><th style="text-align:right;">Left</th><th>Type</th><th style="text-align:right;">Priority</th><th title="Shows on Active Projects and the dashboard">Building</th><th>List</th><th></th></tr></thead>
           <tbody id="seBody"></tbody>
         </table>
       </div>
@@ -406,13 +393,7 @@
   <div class="tabpage" id="tab-active">
     <div class="panel">
       <h2>Active Projects <span class="h2sub" id="apMeta"></span></h2>
-      <div class="ap-add">
-        <select id="apSku" style="min-width:300px;"></select>
-        <input type="number" id="apQty" min="1" placeholder="Qty" style="width:90px;">
-        <button class="btn" id="apAddBtn">+ Add to active projects</button>
-        <button class="btn-ghost" id="apDashBtn" title="Full-screen display for a shop-floor TV">Dashboard mode</button>
-        <span class="colornote">Pick the SKUs you are building right now. Quantity starts from what the schedule still has remaining; change it any time. Shared with everyone signed in.</span>
-      </div>
+      <div class="ap-add"><button class="btn-ghost" id="apDashBtn" title="Full-screen display for a shop-floor TV">Dashboard mode</button><span class="colornote">Shows every schedule row ticked <b>Building</b> in the Schedule Editor, one card per SKU with the remaining quantity added up. Untick a row (or close out the month) and it leaves this page.</span></div>
       <div id="apDashBar"><span id="apDashTitle"></span><span><span class="colornote">Updates live &middot; press Esc to exit</span> <button class="btn-ghost" id="apDashExit">Exit dashboard</button></span></div>
       <div id="apList"></div>
       <div class="footnote" style="margin-top:12px;">Pictures come from Orion's Orion Exclusives page and are matched by SKU where possible. If a picture is missing or wrong, choose the right Orion item on the card, or paste an image link. Paint estimates use the same per-part allowances as the Build Plan.</div>
@@ -930,7 +911,6 @@ function populateMonthFilter(){
   [...new Set(APP.schedule.map(r=>r.month))].forEach(m=>{ const o=document.createElement('option'); o.value=m; o.textContent=m; monthFilter.appendChild(o); });
   if([...monthFilter.options].some(o=>o.value===keepMonth)) monthFilter.value=keepMonth;
 }
-const manualSkuSel = document.getElementById('manualSku');
 // ================= SCHEDULE EDITOR =================
 const SE_TYPES = ['PAINT','PAINT, LASER','LASER','OTHER'];
 function matchBomSku(modSku){
@@ -985,9 +965,10 @@ function renderSchedEditor(){
       <td><select data-sef="type">${opts.map(o=>`<option value="${escH(o)}" ${o===typeVal?'selected':''}>${o?escH(o):'— none —'}</option>`).join('')}</select>
         ${a.noType?'<div class="no-match">no Type — not counted</div>':''}</td>
       <td class="num"><input type="number" min="0" style="width:60px;" data-sef="priority" value="${r.priority??''}"></td>
+      <td style="text-align:center;"><input type="checkbox" data-sef="building" ${r.building?'checked':''} title="Show on Active Projects and the dashboard"></td>
       <td style="font-size:.72rem;color:var(--paper-dim);">${escH(r.section||'')}</td>
       <td><button class="btn-ghost" data-seedit="${escH(key)}">Edit</button></td></tr>`;
-  }).join('') : '<tr><td colspan="10" class="colornote">No rows match.</td></tr>';
+  }).join('') : '<tr><td colspan="11" class="colornote">No rows match.</td></tr>';
 }
 
 // Each schedule row is its own Firestore document, so only the rows you changed are written.
@@ -997,7 +978,7 @@ async function commitScheduleChange(mutator){
   APP.schedule = list;
   APP.meta.schedule_updated = new Date().toISOString();
   await storeSet('schedule_data', APP.schedule); await storeSet('meta', APP.meta);
-  populateMonthFilter(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderSchedEditor();
+  populateMonthFilter(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderSchedEditor(); if(activeTabId()==='active') renderActiveProjects();
 }
 function recomputeRow(r){
   r.ordered = (r.ordered===''||r.ordered==null||isNaN(r.ordered)) ? null : +r.ordered;
@@ -1103,7 +1084,8 @@ document.getElementById('seBody').addEventListener('click', e=>{ const b=e.targe
 document.getElementById('seBody').addEventListener('change', async e=>{
   const t=e.target, f=t.dataset.sef; if(!f) return;
   const key=t.closest('tr').dataset.key;
-  const val = f==='type' ? t.value : (t.value===''?null:+t.value);
+  const val = f==='building' ? t.checked : (f==='type' ? t.value : (t.value===''?null:+t.value));
+  if(f==='building'){ await commitScheduleChange(list=>{ const r=list.find(x=>rsKey(x)===key); if(r){ r.building=!!val; r.edited_by=userEmail(); } return list; }); return; }
   const before=APP.schedule.find(r=>rsKey(r)===key);
   const typeChanged = f==='type' && before && String(before.type||'')!==val;
   await commitScheduleChange(list=>{
@@ -1121,7 +1103,8 @@ document.getElementById('seBody').addEventListener('change', async e=>{
       const card=APP.bomBySku[t.value.trim()];
       if(card){ // fill the descriptive fields from the BOM card
         const r=seEdit.row; r.mfr=card.mfr||''; r.model=card.model||''; r.design=card.design||'';
-        ['mfr','model','design'].forEach(k=>{ const el=p.querySelector(`[data-sf=${k}]`); if(el) el.value=r[k]; });
+        if(!seEdit.origKey && !r.frames && !r.slides && !r.controls && !r.comments) Object.assign(r, flagsFromCard(card));
+        ['mfr','model','design','frames','slides','controls','comments'].forEach(k=>{ const el=p.querySelector(`[data-sf=${k}]`); if(el) el.value=r[k]||''; });
       }
       const [m]=matchBomSku(t.value.trim());
       document.getElementById('seMatchNote').innerHTML = m?`Matches BOM card <span class="code">${escH(m)}</span>.`:'<span class="no-match">No BOM card matches this SKU yet — add it on the BOM Library tab.</span>';
@@ -1282,7 +1265,7 @@ async function commitBomChange(mutator){
   APP.bom = list; rebuildBomIndex();
   APP.meta.bom_updated = new Date().toISOString();
   await storeSet('bom_data', APP.bom); await storeSet('meta', APP.meta);
-  populateManualSkuSelect(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderBomLibrary();
+  buildRowStates(); renderSchedule(); updateMetaLabels(); renderBomLibrary();
 }
 function bomLinkedRows(sku){ return APP.schedule.filter(r=>(APP.rowStateMap[rsKey(r)]?.matchedSku ?? r.matched_sku)===sku).length; }
 async function saveBomEditor(){
@@ -1346,12 +1329,6 @@ document.getElementById('bomLibBody').addEventListener('click', e=>{
   });
 })();
 
-function populateManualSkuSelect(){
-  manualSkuSel.innerHTML = '<option value="">Select a SKU...</option>';
-  APP.bom.slice().sort((a,b)=>a.sku.localeCompare(b.sku)).forEach(b=>{
-    const o=document.createElement('option'); o.value=b.sku; o.textContent=`${b.sku} — ${b.design||''}`; manualSkuSel.appendChild(o);
-  });
-}
 
 document.getElementById('qtyBasisSeg').addEventListener('click', e=>{
   const btn=e.target.closest('button'); if(!btn) return;
@@ -1446,26 +1423,6 @@ function renderSchedule(){
   renderAggregate();
 }
 
-document.getElementById('manualAddBtn').addEventListener('click', ()=>{
-  const sku=manualSkuSel.value, qty=Math.max(1, parseInt(document.getElementById('manualQty').value)||1);
-  if(!sku) return;
-  const ex = APP.manualPlan.find(p=>p.sku===sku);
-  if(ex) ex.qty+=qty; else APP.manualPlan.push({sku,qty});
-  saveKey('manual_plan', APP.manualPlan);
-  renderManualList(); renderAggregate();
-});
-function renderManualList(){
-  const wrap = document.getElementById('manualList');
-  if(APP.manualPlan.length===0){ wrap.innerHTML=''; return; }
-  wrap.innerHTML = '<table><tbody>' + APP.manualPlan.map(p=>{
-    const rec = APP.bomBySku[p.sku];
-    return `<tr><td><span class="code">${p.sku}</span> <span style="color:var(--paper-dim);">${rec?rec.design:''}</span></td>
-      <td class="num">x${p.qty}</td>
-      <td class="no-print"><button class="btn-ghost" onclick="removeManual('${p.sku}')">Remove</button></td></tr>`;
-  }).join('') + '</tbody></table>';
-}
-function removeManual(sku){ APP.manualPlan = APP.manualPlan.filter(p=>p.sku!==sku); saveKey('manual_plan', APP.manualPlan); renderManualList(); renderAggregate(); }
-window.removeManual = removeManual;
 
 function activeDemandRows(){
   const monthOrder={}; [...new Set(APP.schedule.map(r=>r.month))].forEach((m,i)=>monthOrder[m]=i);
@@ -1494,17 +1451,6 @@ function aggregateColors(){
       if(!agg[code].name && meta.name) agg[code].name = meta.name;
     });
   });
-  APP.manualPlan.forEach(p=>{
-    const rec = APP.bomBySku[p.sku]; if(!rec) return;
-    const colors = rec.colors||[];
-    const totalGalForSku = (rec.paint_gal||0)*p.qty;
-    const perColorGal = colors.length ? totalGalForSku/colors.length : 0;
-    colors.forEach(c=>{
-      if(!agg[c.code]) agg[c.code]={name:c.name, units:0, gal:0, mlTotal:0, splatter:false, mixed:false};
-      agg[c.code].units+=p.qty; agg[c.code].gal+=perColorGal; agg[c.code].mlTotal+=perColorGal*ML_PER_GAL;
-      agg[c.code].splatter=agg[c.code].splatter||c.splatter; agg[c.code].mixed=agg[c.code].mixed||c.mixed;
-    });
-  });
   return agg;
 }
 
@@ -1513,7 +1459,7 @@ function renderAggregate(){
   const codes = Object.keys(agg).sort((a,b)=>agg[b].gal-agg[a].gal);
   const body = document.getElementById('aggBody');
   const totalGal = codes.reduce((s,c)=>s+agg[c].gal,0);
-  const totalUnits = activeDemandRows().reduce((s,rs)=>s+computedQty(rs),0) + APP.manualPlan.reduce((s,p)=>s+p.qty,0);
+  const totalUnits = activeDemandRows().reduce((s,rs)=>s+computedQty(rs),0);
   document.getElementById('totalsRow').innerHTML = `
     <div class="stat"><div class="n">${totalUnits}</div><div class="l">Units in plan</div></div>
     <div class="stat"><div class="n">${totalGal.toFixed(2)}</div><div class="l">Total paint (gal)</div></div>
@@ -1743,7 +1689,7 @@ document.getElementById('importBom').addEventListener('change', async e=>{
     APP.meta.bom_updated = new Date().toISOString();
     await storeSet('bom_data', APP.bom);
     await storeSet('meta', APP.meta);
-    populateManualSkuSelect(); buildRowStates(); renderSchedule(); updateMetaLabels(); renderBomLibrary();
+    buildRowStates(); renderSchedule(); updateMetaLabels(); renderBomLibrary();
     toast(`BOM cards updated — ${APP.bom.length} SKUs` + (keptEdits?`, kept ${keptEdits} edited here`:'') + (newColors ? `, ${newColors} new paint color${newColors===1?'':'s'} added to inventory at 0 mL` : ''));
   }catch(err){ toast('Could not read that file — check it matches the BOM Cards format'); }
   e.target.value='';
@@ -1800,72 +1746,76 @@ function orionGuess(sku){
   for(const c of cands) if(byUp[c]) return byUp[c];
   return '';
 }
-function apOrionKey(p){ if(p.orion==='none') return ''; return p.orion || orionGuess(p.sku); }
+function apOrionKey(p){ if(p.orion==='none') return ''; return p.orion || orionGuess(p.sku) || orionGuess(p.mod); }
 function apImage(p){
   if(p.img) return {src:p.img, name:'custom image'};
   const k=apOrionKey(p); return k ? {src:ORION_MAP[k].i, name:ORION_MAP[k].n, key:k, guessed:!p.orion} : null;
 }
-function apRemaining(sku){ return APP.schedule.filter(r=>r.mod_sku===sku).reduce((s,r)=>s+(Number(r.remaining)||0),0); }
-function populateApSkuSelect(){
-  const sel=document.getElementById('apSku'); if(!sel) return; const cur=sel.value;
-  const taken=new Set(APP.activeProjects.map(p=>p.sku));
-  sel.innerHTML='<option value="">Select a SKU to add...</option>'+APP.bom.slice().sort((a,b)=>String(a.sku).localeCompare(String(b.sku)))
-    .filter(b=>!taken.has(b.sku)).map(b=>`<option value="${escH(b.sku)}">${escH(b.sku)} — ${escH(b.design||'')}</option>`).join('');
-  sel.value=cur;
+function apGroups(){                                                  // building rows -> one entry per SKU
+  const g={};
+  APP.schedule.forEach(r=>{
+    if(!r.building) return;
+    const qty = r.remaining!=null ? r.remaining : Math.max((r.ordered||0)-(r.completed||0),0);
+    if(!(qty>0)) return;
+    const sku=((APP.rowStateMap[rsKey(r)]||{}).matchedSku) || r.matched_sku || r.mod_sku;
+    const e=g[sku] || (g[sku]={sku, mod:r.mod_sku, qty:0, rows:[], first:r});
+    e.qty+=qty; e.rows.push({month:r.month, qty, key:rsKey(r)});
+  });
+  return Object.values(g).sort((a,b)=>String(a.sku).localeCompare(String(b.sku)));
 }
 const PART_LABEL = {frame:'Frame', slide:'Slide', barrel:'Barrel', mag_base_plate:'Mag base', small_parts:'Small parts'};
 function renderActiveProjects(){
   const list=document.getElementById('apList'); if(!list) return;
-  populateApSkuSelect();
-  const total=APP.activeProjects.reduce((s,p)=>s+(Number(p.qty)||0),0);
-  document.getElementById('apMeta').textContent = `${APP.activeProjects.length} project${APP.activeProjects.length===1?'':'s'} · ${total} guns`;
-  document.getElementById('apDashTitle').textContent = `In production now · ${APP.activeProjects.length} project${APP.activeProjects.length===1?'':'s'} · ${total} guns`;
-  if(!APP.activeProjects.length){ list.innerHTML='<div class="ap-empty">No active projects yet. Pick a SKU above to add what you are building now.</div>'; return; }
+  const groups=apGroups(), total=groups.reduce((s,g)=>s+g.qty,0);
+  document.getElementById('apMeta').textContent = `${groups.length} project${groups.length===1?'':'s'} · ${total} guns`;
+  document.getElementById('apDashTitle').textContent = `In production now · ${groups.length} project${groups.length===1?'':'s'} · ${total} guns`;
+  if(!groups.length){ list.innerHTML='<div class="ap-empty">Nothing is marked as building. In the Schedule Editor, tick <b>Building</b> on the rows you are working on.</div>'; return; }
   const orionOpts='<option value="">Auto-match</option><option value="none">No picture</option>'+Object.keys(ORION_MAP).sort().map(k=>`<option value="${escH(k)}">${escH(k)} — ${escH(ORION_MAP[k].n.slice(0,34))}</option>`).join('');
-  list.innerHTML=APP.activeProjects.map(p=>{
-    const b=APP.bomBySku[p.sku], qty=Number(p.qty)||0, img=apImage(p), rem=apRemaining(p.sku);
+  list.innerHTML=groups.map(gr=>{
+    const set=APP.activeProjects.find(x=>x.sku===gr.sku)||{}, p={...set, sku:gr.sku, mod:gr.mod};
+    const b=APP.bomBySku[gr.sku], qty=gr.qty, img=apImage(p), r0=gr.first;
+    const months=gr.rows.map(x=>`${escH(String(x.month).replace(/ \d{4}$/,''))} ${x.qty}`).join(' + ');
     const colors=(b&&b.colors||[]).map(c=>{
       const per=PART_ML[c.part], ml=per?Math.round(per*qty*10)/10:null;
       return `<tr><td class="code">${escH(c.code)}</td><td>${escH(c.name||'')}${c.splatter?' <span class="flag mixed">splatter</span>':''}${c.mixed?' <span class="flag mixed">mixed</span>':''}</td><td>${c.part?escH(PART_LABEL[c.part]||c.part):'<span class="colornote">part not set</span>'}</td><td>${ml!=null?ml+' mL':'—'}</td></tr>`;
     }).join('');
     const pic = img ? `<div class="imgbox"><img src="${escH(img.src)}" alt="" data-apimg="1"><div class="noimg" style="display:none">Picture would not load</div></div><div class="orionname">${escH(img.name)}${img.guessed?'<br><span class="colornote">auto-matched</span>':''}</div>`
                     : `<div class="imgbox"><div class="noimg">No Orion picture matched.<br>Choose one below.</div></div>`;
-    return `<div class="ap-card" data-sku="${escH(p.sku)}">
+    const title=b?b.design:(r0.design||gr.sku);
+    return `<div class="ap-card" data-sku="${escH(gr.sku)}">
       <div class="ap-pic">${pic}</div>
       <div class="ap-body">
-        <div class="ap-title">${escH(b?b.design:p.sku)}</div>
-        <div class="ap-sub"><span class="code">${escH(p.sku)}</span> · ${escH(b?((b.mfr||'')+' '+(b.model||'')+' '+(b.caliber||'')).trim():'no BOM card found for this SKU')}</div>
-        <div class="ap-qty"><label class="colornote">Making</label><input type="number" min="0" value="${qty}" data-apqty="1"><span class="colornote">${rem?`schedule has ${rem} remaining`:'not on the schedule'}</span></div>
+        <div class="ap-title">${escH(title)}</div>
+        <div class="ap-sub"><span class="code">${escH(gr.sku)}</span> · ${escH(b?((b.mfr||'')+' '+(b.model||'')+' '+(b.caliber||'')).trim():((r0.mfr||'')+' '+(r0.model||'')+' — no BOM card matched').trim())}</div>
+        <div class="ap-qty"><label class="colornote">Making</label><span class="apqty-n">${qty}</span><span class="colornote">${gr.rows.length>1?months:escH(String(gr.rows[0].month))+' balance'}</span></div>
         ${b&&b.description?`<div class="ap-desc">${escH(b.description)}</div>`:''}
-        ${colors?`<table class="ap-colors"><thead><tr><th>Code</th><th>Color</th><th>Part</th><th>For ${qty}</th></tr></thead><tbody>${colors}</tbody></table>`:'<div class="colornote">No paint codes on this BOM card.</div>'}
+        ${colors?`<table class="ap-colors"><thead><tr><th>Code</th><th>Color</th><th>Part</th><th>For ${qty}</th></tr></thead><tbody>${colors}</tbody></table>`:'<div class="colornote">No paint colors on this BOM card.</div>'}
         <div class="ap-tools">
-          <select data-aporion="1" title="Which Orion item's picture to show">${orionOpts.replace(`value="${escH(p.orion||'')}"`,`value="${escH(p.orion||'')}" selected`)}</select>
-          <input type="text" data-apimgurl="1" placeholder="or paste image link" value="${escH(p.img||'')}">
-          <button class="btn-ghost" data-apremove="1">Remove</button>
+          <select data-aporion="1" title="Which Orion item's picture to show">${orionOpts.replace(`value="${escH(set.orion||'')}"`,`value="${escH(set.orion||'')}" selected`)}</select>
+          <input type="text" data-apimgurl="1" placeholder="or paste image link" value="${escH(set.img||'')}">
+          <button class="btn-ghost" data-apremove="1">Stop building</button>
         </div>
       </div></div>`;
   }).join('');
 }
-function apUpdate(sku, fn){ const p=APP.activeProjects.find(x=>x.sku===sku); if(!p) return; fn(p); p.edited_by=userEmail(); saveKey('active_projects', APP.activeProjects); }
-document.getElementById('apAddBtn').addEventListener('click', ()=>{
-  const sku=document.getElementById('apSku').value; if(!sku){ toast('Pick a SKU first'); return; }
-  if(APP.activeProjects.some(p=>p.sku===sku)){ toast('That SKU is already active'); return; }
-  const q=parseInt(document.getElementById('apQty').value,10), qty=Number.isFinite(q)&&q>=0 ? q : (apRemaining(sku)||1);
-  APP.activeProjects.push({sku, qty, orion:'', img:'', added_by:userEmail(), added_at:new Date().toISOString()});
-  saveKey('active_projects', APP.activeProjects);
-  document.getElementById('apQty').value=''; renderActiveProjects();
-});
+function apUpdate(sku, fn){
+  let p=APP.activeProjects.find(x=>x.sku===sku);
+  if(!p){ p={sku, orion:'', img:'', added_at:new Date().toISOString()}; APP.activeProjects.push(p); }
+  fn(p); p.edited_by=userEmail(); saveKey('active_projects', APP.activeProjects);
+}
 const apList=document.getElementById('apList');
 apList.addEventListener('change', e=>{
   const card=e.target.closest('.ap-card'); if(!card) return; const sku=card.dataset.sku;
-  if(e.target.dataset.apqty){ const q=Math.max(0,parseInt(e.target.value,10)||0); apUpdate(sku,p=>{p.qty=q;}); renderActiveProjects(); }
-  else if(e.target.dataset.aporion!==undefined){ apUpdate(sku,p=>{p.orion=e.target.value; if(e.target.value) p.img='';}); renderActiveProjects(); }
+  if(e.target.dataset.aporion!==undefined){ apUpdate(sku,p=>{p.orion=e.target.value; if(e.target.value) p.img='';}); renderActiveProjects(); }
   else if(e.target.dataset.apimgurl!==undefined){ const v=e.target.value.trim(); if(v && !/^https?:\/\//i.test(v)){ toast('Image link must start with http:// or https://'); return; } apUpdate(sku,p=>{p.img=v;}); renderActiveProjects(); }
 });
-apList.addEventListener('click', e=>{
-  if(!e.target.dataset.apremove) return; const card=e.target.closest('.ap-card'); const sku=card.dataset.sku;
-  if(!confirm('Remove '+sku+' from active projects?')) return;
-  APP.activeProjects=APP.activeProjects.filter(p=>p.sku!==sku); saveKey('active_projects', APP.activeProjects); renderActiveProjects();
+apList.addEventListener('click', async e=>{
+  if(!e.target.dataset.apremove) return; const sku=e.target.closest('.ap-card').dataset.sku;
+  const g=apGroups().find(x=>x.sku===sku); if(!g) return;
+  if(!confirm('Stop building '+sku+'? This unticks Building on its schedule rows.')) return;
+  const keys=new Set(g.rows.map(x=>x.key));
+  await commitScheduleChange(list=>{ list.forEach(r=>{ if(keys.has(rsKey(r))){ r.building=false; r.edited_by=userEmail(); } }); return list; });
+  renderActiveProjects();
 });
 apList.addEventListener('error', e=>{ if(e.target && e.target.dataset && e.target.dataset.apimg){ e.target.style.display='none'; const n=e.target.nextElementSibling; if(n) n.style.display='block'; } }, true);
 
@@ -1905,15 +1855,15 @@ let appReady=false, unsubs=[], refreshT=null, refreshTries=0, running=null;
 function activeTabId(){ const p=document.querySelector('.tabpage.active'); return p ? p.id.replace('tab-','') : ''; }
 function userIsEditing(){
   const a=document.activeElement;
-  return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest('#schedBody,#invBody,#seBody,#manualList,#apList'));
+  return !!(a && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName) && a.closest('#schedBody,#invBody,#seBody,#apList'));
 }
 function scheduleRefresh(){ clearTimeout(refreshT); refreshT=setTimeout(doRefresh, 250); }
 function doRefresh(){
   if(!appReady) return;
   if(userIsEditing() && refreshTries<8){ refreshTries++; refreshT=setTimeout(doRefresh, 800); return; }   // don't yank a field out from under someone typing
   refreshTries=0;
-  rebuildBomIndex(); populateMonthFilter(); populateManualSkuSelect(); buildRowStates();
-  renderSchedule(); renderManualList(); updateMetaLabels();
+  rebuildBomIndex(); populateMonthFilter(); buildRowStates();
+  renderSchedule(); updateMetaLabels();
   const t=activeTabId();
   if(t==='inventory') renderInventory();
   if(t==='bom') renderBomLibrary();
@@ -1930,6 +1880,31 @@ function listen(ref, onData){
       if(first){ first=false; resolve(info); } else if(appReady) scheduleRefresh();
     }, err=>{ if(first){ first=false; reject(err); } else console.error('Live update failed', err); }));
   });
+}
+
+function flagsFromCard(card){                                         // which parts get painted, read from the BOM card's colors
+  const parts=new Set(((card&&card.colors)||[]).map(c=>c.part).filter(Boolean));
+  if(!parts.size){ parts.add('frame'); parts.add('slide'); }
+  const yes=v=>v?'YES':'NO', cm=[];
+  if(parts.has('barrel')) cm.push('Barrel');
+  if(parts.has('mag_base_plate')) cm.push('Magazine baseplate');
+  return {frames:yes(parts.has('frame')), slides:yes(parts.has('slide')), controls:yes(parts.has('small_parts')), comments:cm.join(', ')};
+}
+async function convertOneOffs(){                                       // one-off builds are now ordinary schedule rows
+  if(!APP.manualPlan.length) return;
+  const month = APP.schedule.length ? APP.schedule[APP.schedule.length-1].month : 'One-off builds';
+  let n=0;
+  APP.manualPlan.forEach(p=>{
+    const ex=APP.schedule.find(r=>r.month===month && r.mod_sku===p.sku);
+    if(ex){ ex.ordered=(ex.ordered||0)+p.qty; recomputeRow(ex); ex.site_edited=true; n++; return; }
+    const card=APP.bomBySku[p.sku]||{};
+    const row={month, section:'MAIN', mfr:card.mfr||'', model:card.model||'', design:card.design||'', mod_sku:p.sku, ordered:p.qty, completed:0, type:'PAINT', priority:null, site_created:true, site_edited:true, edited_by:userEmail(), ...flagsFromCard(card)};
+    recomputeRow(row); APP.schedule.push(row); n++;
+  });
+  APP.manualPlan=[];
+  ensureUid(APP.schedule); ensureOrd(APP.schedule);
+  await syncNow('schedule_data'); await syncNow('manual_plan');
+  toast(`${n} one-off build${n===1?'':'s'} moved onto the schedule (${month})`);
 }
 async function startApp(){
   stopListeners();
@@ -1959,9 +1934,10 @@ async function startApp(){
   if(inv && !inv.exists){ APP.invRaw = SEED_INVENTORY; await storeSet('inventory_raw', APP.invRaw); }
 
   rebuildBomIndex();
-  populateMonthFilter(); populateManualSkuSelect(); buildRowStates();
+  await convertOneOffs();
+  populateMonthFilter(); buildRowStates();
   [...document.getElementById('qtyBasisSeg').children].forEach(b=>b.classList.toggle('active', b.dataset.v===APP.qtyBasis));
-  renderSchedule(); renderManualList(); updateMetaLabels();
+  renderSchedule(); updateMetaLabels();
   document.getElementById('loadingScreen').style.display='none';
   document.getElementById('loginScreen').style.display='none';
   document.getElementById('mainWrap').style.display='block';
